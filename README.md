@@ -1,4 +1,4 @@
-# Filters & parameters recap — Tableau dashboard extension (v2.3.1)
+# Filters & parameters recap — Tableau dashboard extension (v2.4.0)
 
 Shows a visual recap of **what the user has selected on the dashboard**, in English (default) or French, with a full **export**.
 
@@ -53,8 +53,15 @@ The Tableau library is found automatically in the folder's `lib/`, or else in th
 | Show filters set to "All" | Off | Shown greyed out |
 | Workbook font | On | Uses the sheets' font (Tableau 2021.4+) |
 | Cards in hidden containers | On | Includes a collapsed filter panel |
+| Parameter controls in hidden containers | On | Turn off if hidden containers hold technical parameters |
 | Hide "every value ticked" filters | On | Background query; turn off on very large sources |
 | "All except Null" = not restrictive | On | Matches the "(All)" shown by Tableau |
+
+## Recap content (per dashboard)
+
+Configure… > **Recap content** lists every filter of every sheet and every parameter of the workbook, with what the automatic mode does with it. Set any item to **Always show** or **Never show** to make the recap match the dashboard exactly (e.g. a parameter changed through a parameter action with no control, a technical parameter whose control sits in a hidden container). Choices are saved with this dashboard's extension.
+
+Parameter controls are linked to their parameter by id when Tableau provides it, otherwise by exact name, then normalized name, then partial name **only when a single parameter matches** (an ambiguous control is reported in Diagnostics and in the Recap content tab instead of being linked to the wrong parameter).
 
 ## Diagnostics
 

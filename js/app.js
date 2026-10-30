@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.3.1';
+  var VERSION = '2.4.0';
   var SETTINGS_KEY = 'recapConfig';
   var DEFAULTS = {
     title: '',               // vide = titre par défaut, traduit
@@ -34,6 +34,8 @@
     maxChips: 4,
     useWorkbookFont: true,
     includeHiddenCards: true, // cartes dans un conteneur replié (panneau de filtres)
+    includeHiddenParams: true, // contrôles de paramètre dans un conteneur replié
+    overrides: null,          // { f: {cléFiltre: 'show'|'hide'}, p: {cléParam: 'show'|'hide'} } — par dashboard
     checkAllSelected: true,   // détecter « toutes les valeurs cochées une à une » (requête de fond)
     ignoreNullOnly: true      // « Tout sauf Null » = non restrictif (comme la carte « (Tout) »)
   };
@@ -259,8 +261,9 @@
       if (o.type !== DOT.QuickFilter && o.type !== DOT.ParameterControl) return;
       // Une carte dans un conteneur replié (panneau de filtres « afficher/masquer »)
       // est isVisible=false mais fait bien partie du dashboard.
-      if (o.isVisible === false && !cfg.includeHiddenCards) return;
-      (o.type === DOT.QuickFilter ? qf : pc).push(o);
+      var isQf = o.type === DOT.QuickFilter;
+      if (o.isVisible === false && !(isQf ? cfg.includeHiddenCards : cfg.includeHiddenParams)) return;
+      (isQf ? qf : pc).push(o);
     });
     qf.sort(byPosition); pc.sort(byPosition);
     return { qf: qf, pc: pc };
@@ -270,7 +273,7 @@
     var x = exposureObjects();
     return x.qf.concat(x.pc).map(function (o) {
       var p = o.position || {};
-      return o.id + '|' + (o.fieldId || '') + '|' + o.name + '|' + (cfg.includeHiddenCards ? '' : o.isVisible) +
+      return o.id + '|' + (o.fieldId || '') + '|' + o.name + '|' + (cfg.includeHiddenCards && cfg.includeHiddenParams ? '' : o.isVisible) +
         '|' + Math.round((p.x || 0) / 12) + ',' + Math.round((p.y || 0) / 12);
     }).join(';');
   }
@@ -302,7 +305,7 @@
         if (b && byBase.has(b)) return byBase.get(b);
         return null;
       },
-      paramControls: x.pc.map(function (o, i) { return { name: o.name || '', order: i }; })
+      paramControls: x.pc.map(function (o, i) { return { id: o.id, name: o.name || '', order: i, fieldId: o.fieldId || '', hidden: o.isVisible === false }; })
     };
   }
 
@@ -343,21 +346,30 @@
       );
     }));
     var paramsP = cfg.showParams ? readExposedParams(exposure.paramControls) : Promise.resolve([]);
+    state.paramDiag = [];
 
     return Promise.all([filtersP, paramsP]).then(function (res) {
       var byKey = new Map(); var fieldSheets = new Map(); var diag = [];
       var matchedCards = new Set(); var usefulSheets = new Set();
+      var ov = overrides(); var forcedIdx = 0;
 
       res[0].forEach(function (r) {
         if (r.err) diag.push({ sheet: r.ws.name, field: '—', type: '—', status: t('st_read_err'), tone: 'err' });
         r.fs.forEach(function (f) {
+          var key = filterKey(f);
+          var o = ov.f[key];
           var card = exposure.matchFilter(f);
           var row = { sheet: r.ws.name, field: f.fieldName, type: f.filterType, status: '', tone: 'off' };
           diag.push(row);
-          if (!card) { row.status = t('st_no_card'); return; }
-          if (isGeneratedName(f.fieldName)) { matchedCards.add(card.id); row.status = t('st_generated'); return; }
-          var key = filterKey(f);
-          matchedCards.add(card.id); usefulSheets.add(r.ws.name);
+          if (o === 'hide') { if (card) matchedCards.add(card.id); row.status = t('st_forced_hide'); return; }
+          if (!card && o !== 'show') { row.status = t('st_no_card'); return; }
+          if (!card) {
+            var prevForced = byKey.get(key);
+            card = prevForced ? prevForced.card : { id: 'forced:' + key, order: 1000 + (forcedIdx++), hidden: false, forced: true, virtual: true };
+          } else if (o === 'show') card = assign({}, card, { forced: true });
+          if (isGeneratedName(f.fieldName) && o !== 'show') { matchedCards.add(card.id); row.status = t('st_generated'); return; }
+          if (!card.virtual) matchedCards.add(card.id);
+          usefulSheets.add(r.ws.name);
           if (!fieldSheets.has(key)) fieldSheets.set(key, []);
           fieldSheets.get(key).push(r.ws.name);
           if (byKey.has(key)) { row.status = t('st_dup'); return; }
@@ -366,18 +378,20 @@
       });
 
       // Cartes sans filtre correspondant trouvé en mode routé : relecture complète.
-      if (routed && matchedCards.size < exposure.cards.length) { state.routes = null; return fullScan(false, true); }
+      var forcedMissing = Object.keys(ov.f).some(function (k) { return ov.f[k] === 'show' && !byKey.has(k); });
+      if (routed && (matchedCards.size < exposure.cards.length || forcedMissing)) { state.routes = null; return fullScan(false, true); }
 
       var fMap = new Map(); var objs = new Map(); var names = new Set();
       byKey.forEach(function (x, key) {
         var it = buildFilterItem(x.f, x.card);
+        if (x.card.forced) { it.forced = true; finalize(it); }
         objs.set(key, x.f);
         fMap.set(key, it);
         names.add(norm(x.f.fieldName));
-        x.row.status = it.pending ? t('st_pending') :
+        x.row.status = x.card.forced ? t('st_forced_show') : it.pending ? t('st_pending') :
           it.active ? t('st_shown') + (it.except ? t('st_shown_except') : '') + (x.card.hidden ? t('st_hidden_card') : '') :
           t(it.reason || 'st_all');
-        x.row.tone = it.active ? 'ok' : 'off';
+        x.row.tone = it.active || x.card.forced ? 'ok' : 'off';
       });
       exposure.cards.forEach(function (c) {
         if (!matchedCards.has(c.id)) diag.push({ sheet: '—', field: c.name, type: t('type_card'), status: t('st_card_nofilter'), tone: 'err' });
@@ -391,7 +405,7 @@
       state.fieldSheets = fieldSheets;
       state.exposedNames = names;
       state.routes = { cards: matchedCards, sheets: usefulSheets };
-      if (!routed) state.diag = diag;
+      if (!routed) state.diag = diag.concat(state.paramDiag || []);
 
       var pMap = new Map();
       res[1].forEach(function (it) { pMap.set(it.key, it); });
@@ -410,7 +424,9 @@
         var prev = state.filters.get(key);
         if (!prev) { queue.full = true; return; } // nouveau filtre exposé -> relecture complète
         state.filterObjs.set(key, f);
-        state.filters.set(key, buildFilterItem(f, { order: prev.order, hidden: prev.hiddenCard }));
+        var nextIt = buildFilterItem(f, { order: prev.order, hidden: prev.hiddenCard });
+        if (prev.forced) { nextIt.forced = true; finalize(nextIt); }
+        state.filters.set(key, nextIt);
       }, function () { queue.full = true; }));
     });
     paramEvents.forEach(function (ev, key) {
@@ -585,7 +601,9 @@
       fetchDomain(f, it.needs).then(function () {
         var cur = state.filterObjs.get(it.key); var curItem = state.filters.get(it.key);
         if (!cur || !curItem) return;
-        state.filters.set(it.key, buildFilterItem(cur, { order: curItem.order, hidden: curItem.hiddenCard }));
+        var nx = buildFilterItem(cur, { order: curItem.order, hidden: curItem.hiddenCard });
+        if (curItem.forced) { nx.forced = true; finalize(nx); }
+        state.filters.set(it.key, nx);
         scheduleRender();
       });
     });
@@ -648,7 +666,18 @@
    * Persistance locale (12 h) : verdicts, totaux, bornes, feuilles utiles,
    * dernier affichage. Les listes de valeurs complètes restent en mémoire.
    * ===================================================================== */
-  function storeKey (kind) { return 'recap:' + VERSION + ':' + kind + ':' + (dashboard && dashboard.name); }
+  // Clé propre à CE dashboard (le stockage est partagé par tous les classeurs
+  // servis depuis la même adresse : un simple nom « Overview » ne suffit pas).
+  var storeId = '';
+  function storeKey (kind) {
+    if (!storeId && dashboard) {
+      var parts = [dashboard.name];
+      dashboard.worksheets.forEach(function (w) { parts.push(w.name); });
+      dashboard.objects.forEach(function (o) { parts.push(o.type + ':' + o.name); });
+      storeId = hashList(parts);
+    }
+    return 'recap:' + VERSION + ':' + kind + ':' + storeId;
+  }
 
   function loadPersisted () {
     try {
@@ -690,39 +719,79 @@
    * Paramètres
    * ===================================================================== */
   function readExposedParams (controls) {
-    if (!controls.length) { syncParamListeners([]); return Promise.resolve([]); }
+    var ov = overrides();
+    var anyForced = Object.keys(ov.p).some(function (k) { return ov.p[k] === 'show'; });
+    if (!controls.length && !anyForced) { syncParamListeners([]); state.paramDiag = []; return Promise.resolve([]); }
     return dashboard.getParametersAsync().then(function (params) {
-      var matched = matchParams(params, controls);
-      syncParamListeners(matched);
-      return matched.map(function (m) { return buildParamItem(m.p, m.order, m.label); });
+      var res = matchParams(params, controls);
+      var diag = [];
+      var shown = [];
+      var matchedKeys = new Set();
+      res.matched.forEach(function (m) {
+        var key = paramKey(m.p);
+        matchedKeys.add(key);
+        if (ov.p[key] === 'hide') { diag.push(pRow(m.label, t('st_forced_hide'), 'off')); return; }
+        shown.push(m);
+        diag.push(pRow(m.label + (m.p.name !== m.label ? ' → ' + m.p.name : ''), t(ov.p[key] === 'show' ? 'st_forced_show' : 'st_p_shown') + (m.hidden ? t('st_hidden_control') : ''), 'ok'));
+      });
+      res.unmatched.forEach(function (c) { diag.push(pRow(c.name, t('st_p_unlinked'), 'err')); });
+      var extra = 0;
+      params.forEach(function (p) {
+        var key = paramKey(p);
+        if (matchedKeys.has(key)) return;
+        if (ov.p[key] === 'show') {
+          shown.push({ p: p, order: 1000 + (extra++), label: p.name });
+          diag.push(pRow(p.name, t('st_forced_show'), 'ok'));
+        } else diag.push(pRow(p.name, t('st_p_nocontrol'), 'off'));
+      });
+      state.paramDiag = diag;
+      syncParamListeners(shown);
+      return shown.map(function (m) { return buildParamItem(m.p, m.order, m.label); });
     });
   }
 
-  // L'API ne relie pas un contrôle à son paramètre : appariement par nom,
-  // du plus strict au plus souple, sans réutiliser un paramètre deux fois.
+  function pRow (name, status, tone) { return { sheet: '—', field: name, type: t('type_param'), status: status, tone: tone }; }
+
+  // L'API ne relie pas explicitement un contrôle à son paramètre. Ordre des
+  // tentatives : identifiant (si Tableau le fournit), nom exact, nom
+  // normalisé, puis nom partiel UNIQUEMENT s'il n'y a qu'un seul candidat
+  // (évite d'associer « Season » au mauvais « Catalog Season Code 1/2 »).
   function matchParams (params, controls) {
-    var taken = new Set(); var out = []; var pending = controls.slice();
-    var passes = [
+    var taken = new Set(); var matched = []; var pending = controls.slice();
+    var idOf = function (s) { return norm(String(s || '').replace(/^\[parameters\]\./i, '')); };
+    var take = function (p, c) { taken.add(paramKey(p)); matched.push({ p: p, order: c.order, label: c.name, hidden: !!c.hidden }); };
+    var exactPasses = [
+      function (p, c) { return c.fieldId && p.id && (c.fieldId === p.id || idOf(c.fieldId) === idOf(p.id)); },
       function (p, c) { return p.name === c.name; },
-      function (p, c) { return norm(p.name) === norm(c.name); },
-      function (p, c) {
-        var a = norm(p.name); var b = norm(c.name);
-        return a && b && (a.indexOf(b) !== -1 || b.indexOf(a) !== -1);
-      }
+      function (p, c) { return norm(p.name) && norm(p.name) === norm(c.name); }
     ];
-    passes.forEach(function (test) {
+    exactPasses.forEach(function (test) {
       pending = pending.filter(function (c) {
         for (var i = 0; i < params.length; i++) {
           var p = params[i];
-          if (!taken.has(paramKey(p)) && test(p, c)) { taken.add(paramKey(p)); out.push({ p: p, order: c.order, label: c.name }); return false; }
+          if (!taken.has(paramKey(p)) && test(p, c)) { take(p, c); return false; }
         }
         return true;
       });
     });
-    if (pending.length) {
-      console.info('[recap] contrôle(s) de paramètre non reliés par leur nom :', pending.map(function (c) { return c.name; }).join(', '));
-    }
-    return out;
+    pending = pending.filter(function (c) {
+      var b = norm(c.name);
+      if (b.length < 4) return true;
+      var cands = params.filter(function (p) {
+        var a = norm(p.name);
+        return !taken.has(paramKey(p)) && a.length >= 4 && (a.indexOf(b) !== -1 || b.indexOf(a) !== -1);
+      });
+      if (cands.length !== 1) return true;
+      take(cands[0], c);
+      return false;
+    });
+    if (pending.length) console.info('[recap] parameter control(s) not linked:', pending.map(function (c) { return c.name; }).join(', '));
+    return { matched: matched, unmatched: pending };
+  }
+
+  function overrides () {
+    var o = cfg.overrides || {};
+    return { f: o.f || {}, p: o.p || {} };
   }
 
   function syncParamListeners (matched) {
@@ -775,7 +844,7 @@
     var pending = 0;
     var filters = sortedVisible(state.filters, function (it) {
       if (it.pending) { pending++; return false; } // verdict inconnu : pas d'apparition/disparition
-      return it.active || cfg.showInactive;
+      return it.active || it.forced || cfg.showInactive;
     });
     var params = cfg.showParams ? sortedVisible(state.params) : [];
     var activeCount = filters.filter(function (it) { return it.active; }).length;
@@ -1206,7 +1275,8 @@
     var langChanged = lang !== t.lang;
     if (langChanged) t = window.RecapI18n.make(lang);
     if (dashboard && (langChanged || prev.showParams !== cfg.showParams || prev.includeHiddenCards !== cfg.includeHiddenCards ||
-        prev.checkAllSelected !== cfg.checkAllSelected || prev.ignoreNullOnly !== cfg.ignoreNullOnly)) {
+        prev.checkAllSelected !== cfg.checkAllSelected || prev.ignoreNullOnly !== cfg.ignoreNullOnly ||
+        prev.includeHiddenParams !== cfg.includeHiddenParams || JSON.stringify(prev.overrides || null) !== JSON.stringify(cfg.overrides || null))) {
       if (prev.ignoreNullOnly !== cfg.ignoreNullOnly) caches.verdicts.clear();
       schedule('full', null, 0);
     }
@@ -1257,12 +1327,44 @@
 
   function openConfig () {
     var url = new URL('configure.html', window.location.href).href;
-    return T.extensions.ui.displayDialogAsync(url, JSON.stringify(cfg), { width: 480, height: 620 })
-      .then(function () { loadSettings(); applyAppearance(); render(); })
+    return buildInventory().catch(function (e) { console.warn('[recap] inventory', e); return null; }).then(function (inv) {
+      return T.extensions.ui.displayDialogAsync(url, JSON.stringify({ cfg: cfg, inventory: inv }), { width: 560, height: 720 });
+    }).then(function () { loadSettings(); applyAppearance(); render(); })
       .catch(function (err) {
         if (T.ErrorCodes && err && err.errorCode === T.ErrorCodes.DialogClosedByUser) return;
         console.warn('[recap] config', err);
       });
+  }
+
+  // Inventaire complet pour l'onglet « Contenu » de la configuration :
+  // tous les filtres de toutes les feuilles et tous les paramètres, avec ce
+  // que le mode automatique en fait.
+  function buildInventory () {
+    var exposure = readExposure();
+    var sheets = dashboard.worksheets;
+    return Promise.all([
+      Promise.all(sheets.map(function (ws) { return ws.getFiltersAsync().catch(function () { return []; }); })),
+      dashboard.getParametersAsync()
+    ]).then(function (res) {
+      var seen = new Map();
+      res[0].forEach(function (fs) {
+        fs.forEach(function (f) {
+          var key = filterKey(f);
+          if (seen.has(key) || isGeneratedName(f.fieldName)) return;
+          var card = exposure.matchFilter(f);
+          seen.set(key, { key: key, name: f.fieldName, auto: card ? 'card' : 'nocard', order: card ? card.order : 1000 + seen.size });
+        });
+      });
+      var filters = Array.from(seen.values()).sort(function (a, b) { return a.order - b.order || a.name.localeCompare(b.name); });
+      var m = matchParams(res[1], exposure.paramControls);
+      var byKey = new Map();
+      m.matched.forEach(function (x) { byKey.set(paramKey(x.p), x); });
+      var params = res[1].map(function (p) {
+        var x = byKey.get(paramKey(p));
+        return { key: paramKey(p), name: p.name, auto: x ? 'control' : 'nocontrol', control: x ? x.label : '', order: x ? x.order : 1000 };
+      }).sort(function (a, b) { return a.order - b.order || a.name.localeCompare(b.name); });
+      return { filters: filters, params: params, unlinked: m.unmatched.map(function (c) { return c.name; }) };
+    });
   }
 
   /* =====================================================================
@@ -1371,7 +1473,7 @@
   window.addEventListener('resize', function () { if (cfg.layout === 'auto') applyLayout(); });
 
   // Expose quelques fonctions pures pour les tests (sans effet en production).
-  window.__recap = { report: function () { return reportToText(buildReport(), t); }, buildReport: function () { return buildReport(); }, version: VERSION, relativeLabel: function (a, b, c) { return t.relative(a, b, c); }, matchParams: matchParams, norm: norm, toNum: toNum, isGeneratedName: isGeneratedName };
+  window.__recap = { inventory: function () { return buildInventory(); }, report: function () { return reportToText(buildReport(), t); }, buildReport: function () { return buildReport(); }, version: VERSION, relativeLabel: function (a, b, c) { return t.relative(a, b, c); }, matchParams: matchParams, norm: norm, toNum: toNum, isGeneratedName: isGeneratedName };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

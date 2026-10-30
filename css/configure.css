@@ -26,3 +26,20 @@ html, body.cfg { overflow: auto; background: #fff; }
 .btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn--ghost { border-color: transparent; background: transparent; color: var(--text-2); }
 .btn:hover { filter: brightness(.97); }
+
+.tabs { display: flex; padding: 0 20px; border-bottom: 1px solid var(--border); }
+.tab { padding: 10px 2px; margin-right: 18px; border: 0; border-bottom: 2px solid transparent; background: none; font: inherit; font-size: 13px; font-weight: 600; color: var(--text-2); cursor: pointer; }
+.tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+.cfg__note { margin: 0 0 12px; font-size: 12px; color: var(--text-2); line-height: 1.5; }
+.cfg__warn { margin: 0 0 12px; padding: 8px 10px; border-radius: 7px; background: var(--danger-soft); color: var(--danger); font-size: 12px; }
+.cfg__h2 { margin: 16px 0 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); }
+.ov-list { border: 1px solid var(--border); border-radius: 8px; }
+.ov-row { display: flex; align-items: center; padding: 7px 10px; border-top: 1px solid var(--border); }
+.ov-row:first-child { border-top: 0; }
+.ov-row__text { flex: 1; min-width: 0; margin-right: 10px; }
+.ov-row__name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-row__auto { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-row select { height: 28px; border: 1px solid var(--border-strong); border-radius: 6px; font: inherit; font-size: 12px; background: #fff; }
+.ov-row.is-show select { border-color: var(--success); color: var(--success); }
+.ov-row.is-hide select { border-color: var(--danger); color: var(--danger); }
+.ov-empty { padding: 10px; font-size: 12px; color: var(--text-3); }

@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Filters &amp; parameters</title>
-  <link rel="stylesheet" href="css/app.css?v=2.3.1">
+  <link rel="stylesheet" href="css/app.css?v=2.4.0">
   <!-- Tableau Extensions API : cherchée d'abord dans ./lib, sinon dans le /lib du dépôt
        tableau/extensions-api (extension placée dans Samples/Dashboard/… et servie par « npm start »). -->
   <script>
     (function () {
       var sources = ['lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.js'];
-      var next = ['js/i18n.js?v=2.3.1', 'js/app.js?v=2.3.1'];
+      var next = ['js/i18n.js?v=2.4.0', 'js/app.js?v=2.4.0'];
       function run () { var src = next.shift(); if (!src) return; var a = document.createElement('script'); a.src = src; a.onload = run; document.head.appendChild(a); }
       function load (i) {
         var s = document.createElement('script');
