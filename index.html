@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Filters &amp; parameters</title>
+  <link rel="stylesheet" href="css/app.css?v=2.3.1">
+  <!-- Tableau Extensions API : cherchée d'abord dans ./lib, sinon dans le /lib du dépôt
+       tableau/extensions-api (extension placée dans Samples/Dashboard/… et servie par « npm start »). -->
+  <script>
+    (function () {
+      var sources = ['lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.js'];
+      var next = ['js/i18n.js?v=2.3.1', 'js/app.js?v=2.3.1'];
+      function run () { var src = next.shift(); if (!src) return; var a = document.createElement('script'); a.src = src; a.onload = run; document.head.appendChild(a); }
+      function load (i) {
+        var s = document.createElement('script');
+        s.src = sources[i];
+        s.onload = run;
+        s.onerror = function () { s.remove(); if (i + 1 < sources.length) load(i + 1); else run(); };
+        document.head.appendChild(s);
+      }
+      load(0);
+    })();
+  </script>
+</head>
+<body>
+  <!-- Sprite d'icônes inline : zéro requête réseau, zéro police d'icônes à télécharger -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 4h18l-7 8.5V19l-4 2v-8.5z"/></symbol>
+      <symbol id="i-filter-off" viewBox="0 0 24 24"><path d="M3 4h18l-7 8.5V19l-4 2v-8.5z"/><path d="M15.5 15.5l5 5M20.5 15.5l-5 5"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M8 16H3v5"/></symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 17l2 2 4-4"/><path d="M3 7l2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+      <symbol id="i-range" viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+      <symbol id="i-tree" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="6" rx="1"/><rect x="3" y="16" width="6" height="6" rx="1"/><rect x="15" y="16" width="6" height="6" rx="1"/><path d="M6 16v-3h12v3M12 8v5"/></symbol>
+      <symbol id="i-hash" viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></symbol>
+      <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></symbol>
+      <symbol id="i-toggle" viewBox="0 0 24 24"><rect x="1" y="5" width="22" height="14" rx="7"/><circle cx="16" cy="12" r="3"/></symbol>
+      <symbol id="i-param" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M22 11.1V12a10 10 0 1 1-5.9-9.1"/><path d="M22 4L12 14l-3-3"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></symbol>
+      <symbol id="i-bug" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="14" rx="5"/><path d="M12 11v6M4 13h3M17 13h3M5 7l2.5 2M19 7l-2.5 2M5 20l2.5-2.5M19 20l-2.5-2.5M9 4.5L10.5 7M15 4.5L13.5 7"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    </defs>
+  </svg>
+
+  <div id="app" class="app is-loading" aria-busy="true">
+    <header class="toolbar">
+      <div class="progress" aria-hidden="true"></div>
+      <div class="toolbar__title">
+        <span class="toolbar__logo"><svg class="ic"><use href="#i-filter"/></svg></span>
+        <div class="toolbar__text">
+          <h1 id="title" data-i18n="title_default">Filters &amp; parameters</h1>
+          <p id="summary" class="toolbar__summary" aria-live="polite" data-i18n="loading">Loading…</p>
+        </div>
+      </div>
+      <div class="toolbar__actions">
+        <button id="btnRefresh" class="icon-btn" type="button" title="Refresh" aria-label="Refresh" data-i18n-title="refresh" data-i18n-aria="refresh">
+          <svg class="ic"><use href="#i-refresh"/></svg>
+        </button>
+        <button id="btnDiag" class="icon-btn" type="button" title="Diagnostics (Ctrl+Alt+D)" aria-label="Diagnostics" data-i18n-title="diagnostics" data-i18n-aria="diagnostics" hidden>
+          <svg class="ic"><use href="#i-bug"/></svg>
+        </button>
+        <button id="btnExport" class="icon-btn" type="button" title="Export" aria-label="Export" data-i18n-title="export" data-i18n-aria="export">
+          <svg class="ic"><use href="#i-download"/></svg>
+        </button>
+        <button id="btnConfig" class="icon-btn" type="button" title="Configure" aria-label="Configure" data-i18n-title="configure" data-i18n-aria="configure" hidden>
+          <svg class="ic"><use href="#i-gear"/></svg>
+        </button>
+        <button id="btnClear" class="icon-btn icon-btn--danger" type="button" title="Reset displayed filters" aria-label="Reset displayed filters" data-i18n-title="reset_all" data-i18n-aria="reset_all" disabled>
+          <svg class="ic"><use href="#i-filter-off"/></svg>
+          <span class="icon-btn__confirm" data-i18n="confirm">Confirm?</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="content" class="content">
+      <div id="errorBanner" class="banner banner--error" role="alert" hidden>
+        <svg class="ic"><use href="#i-alert"/></svg>
+        <span id="errorMessage"></span>
+        <button id="btnRetry" class="link-btn" type="button" data-i18n="retry">Retry</button>
+      </div>
+
+      <section id="diagPanel" class="diag" hidden>
+        <div class="diag__head">
+          <strong data-i18n="diag_title">Filter diagnostics</strong>
+          <button class="link-btn" type="button" data-action="close-diag" data-i18n="close">Close</button>
+        </div>
+        <div id="diagBody" class="diag__body"></div>
+      </section>
+
+      <div id="skeleton" class="skeleton" aria-hidden="true">
+        <div class="skeleton__tile"></div><div class="skeleton__tile"></div><div class="skeleton__tile"></div>
+      </div>
+
+      <div id="emptyState" class="empty" hidden>
+        <span class="empty__icon"><svg class="ic"><use href="#i-check"/></svg></span>
+        <p class="empty__title" data-i18n="empty_title">No restrictive selection</p>
+        <p class="empty__text" data-i18n="empty_text">All dashboard data is displayed.</p>
+      </div>
+
+      <section id="filtersSection" class="section" data-kind="filter" hidden>
+        <h2 class="section__head">
+          <svg class="ic"><use href="#i-filter"/></svg>
+          <span class="section__label" data-i18n="sec_filters">Filters</span>
+          <span id="filtersCount" class="section__count">0</span>
+        </h2>
+        <div id="filtersGrid" class="grid" role="list"></div>
+      </section>
+
+      <section id="paramsSection" class="section" data-kind="param" hidden>
+        <h2 class="section__head">
+          <svg class="ic"><use href="#i-param"/></svg>
+          <span class="section__label" data-i18n="sec_params">Parameters</span>
+          <span id="paramsCount" class="section__count">0</span>
+        </h2>
+        <div id="paramsGrid" class="grid" role="list"></div>
+      </section>
+
+      <footer id="updatedAt" class="updated" hidden></footer>
+    </main>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </div>
+</body>
+</html>

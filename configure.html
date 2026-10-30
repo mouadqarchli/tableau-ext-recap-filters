@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configure</title>
+  <link rel="stylesheet" href="css/app.css?v=2.3.1">
+  <link rel="stylesheet" href="css/configure.css?v=2.3.1">
+  <!-- Tableau Extensions API : cherchée d'abord dans ./lib, sinon dans le /lib du dépôt
+       tableau/extensions-api (extension placée dans Samples/Dashboard/… et servie par « npm start »). -->
+  <script>
+    (function () {
+      var sources = ['lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.js'];
+      var next = ['js/i18n.js?v=2.3.1', 'js/configure.js?v=2.3.1'];
+      function run () { var src = next.shift(); if (!src) return; var a = document.createElement('script'); a.src = src; a.onload = run; document.head.appendChild(a); }
+      function load (i) {
+        var s = document.createElement('script');
+        s.src = sources[i];
+        s.onload = run;
+        s.onerror = function () { s.remove(); if (i + 1 < sources.length) load(i + 1); else run(); };
+        document.head.appendChild(s);
+      }
+      load(0);
+    })();
+  </script>
+</head>
+<body class="cfg">
+  <form id="form" class="cfg__form" autocomplete="off">
+    <header class="cfg__head">
+      <h1 data-i18n="cf_title">Filters &amp; parameters recap</h1>
+      <p data-i18n="cf_intro">Appearance and behaviour of the extension.</p>
+    </header>
+
+    <div class="cfg__body">
+      <div class="row">
+        <label class="field">
+          <span class="field__label" data-i18n="cf_language">Language</span>
+          <select id="language">
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+            <option value="auto" data-i18n="cf_lang_auto">Automatic</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label" data-i18n="cf_title_label">Title</span>
+          <input id="title" type="text" maxlength="60">
+        </label>
+      </div>
+
+      <div class="field">
+        <span class="field__label" data-i18n="cf_accent">Accent colour</span>
+        <div class="swatches" id="swatches"></div>
+      </div>
+
+      <div class="row">
+        <label class="field">
+          <span class="field__label" data-i18n="cf_theme">Theme</span>
+          <select id="theme">
+            <option value="light" data-i18n="cf_theme_light">Light</option>
+            <option value="dark" data-i18n="cf_theme_dark">Dark</option>
+            <option value="transparent" data-i18n="cf_theme_transparent">Transparent</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label" data-i18n="cf_density">Density</span>
+          <select id="density">
+            <option value="comfortable" data-i18n="cf_density_comfortable">Comfortable</option>
+            <option value="compact" data-i18n="cf_density_compact">Compact</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="field">
+          <span class="field__label" data-i18n="cf_layout">Layout</span>
+          <select id="layout">
+            <option value="auto" data-i18n="cf_layout_auto">Automatic</option>
+            <option value="grid" data-i18n="cf_layout_grid">Cards</option>
+            <option value="bar" data-i18n="cf_layout_bar">Horizontal banner</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label" data-i18n="cf_maxchips">Visible values per filter</span>
+          <input id="maxChips" type="number" min="1" max="20" step="1">
+        </label>
+      </div>
+
+      <fieldset class="checks">
+        <label class="check"><input id="showParams" type="checkbox"><span data-i18n="cf_showParams"></span></label>
+        <label class="check"><input id="showReset" type="checkbox"><span data-i18n="cf_showReset"></span></label>
+        <label class="check"><input id="showExport" type="checkbox"><span data-i18n="cf_showExport"></span></label>
+        <label class="check"><input id="showRatio" type="checkbox"><span data-i18n="cf_showRatio"></span></label>
+        <label class="check"><input id="showInactive" type="checkbox"><span data-i18n="cf_showInactive"></span></label>
+        <label class="check"><input id="useWorkbookFont" type="checkbox"><span data-i18n="cf_useWorkbookFont"></span></label>
+        <label class="check"><input id="includeHiddenCards" type="checkbox"><span data-i18n="cf_includeHiddenCards"></span></label>
+        <label class="check"><input id="checkAllSelected" type="checkbox"><span data-i18n="cf_checkAllSelected"></span></label>
+        <label class="check"><input id="ignoreNullOnly" type="checkbox"><span data-i18n="cf_ignoreNullOnly"></span></label>
+      </fieldset>
+    </div>
+
+    <footer class="cfg__foot">
+      <button type="button" id="btnReset" class="btn btn--ghost" data-i18n="cf_defaults">Reset to defaults</button>
+      <span class="spacer"></span>
+      <button type="button" id="btnCancel" class="btn" data-i18n="cf_cancel">Cancel</button>
+      <button type="submit" class="btn btn--primary" data-i18n="cf_save">Save</button>
+    </footer>
+  </form>
+</body>
+</html>
