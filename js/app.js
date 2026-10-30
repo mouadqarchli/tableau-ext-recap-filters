@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.4.0';
+  var VERSION = '2.5.0';
   var SETTINGS_KEY = 'recapConfig';
   var DEFAULTS = {
     title: '',               // vide = titre par défaut, traduit
@@ -467,7 +467,8 @@
   function buildFilterItem (f, card) {
     var key = filterKey(f);
     var type = f.filterType;
-    var base = { key: key, kind: 'filter', type: type, label: f.fieldName, order: card.order, hiddenCard: !!card.hidden, needs: null };
+    var custom = overrides().labels[key];
+    var base = { key: key, kind: 'filter', type: type, label: custom || f.fieldName, fieldName: f.fieldName, order: card.order, hiddenCard: !!card.hidden, needs: null };
 
     if (type === 'categorical') return buildCategorical(f, base);
     if (type === 'range') return buildRange(f, base);
@@ -690,7 +691,7 @@
       }
       var snap = JSON.parse(localStorage.getItem(storeKey('snap')) || 'null');
       if (snap && Date.now() - snap.t < PERSIST_TTL_MS) {
-        snap.f.forEach(function (it) { state.filters.set(it.key, it); state.exposedNames.add(norm(it.label)); });
+        snap.f.forEach(function (it) { state.filters.set(it.key, it); state.exposedNames.add(norm(it.fieldName || it.label)); });
         snap.p.forEach(function (it) { state.params.set(it.key, it); });
         state.stale = true;
         render();
@@ -732,7 +733,7 @@
         matchedKeys.add(key);
         if (ov.p[key] === 'hide') { diag.push(pRow(m.label, t('st_forced_hide'), 'off')); return; }
         shown.push(m);
-        diag.push(pRow(m.label + (m.p.name !== m.label ? ' → ' + m.p.name : ''), t(ov.p[key] === 'show' ? 'st_forced_show' : 'st_p_shown') + (m.hidden ? t('st_hidden_control') : ''), 'ok'));
+        diag.push(pRow(m.label + (m.p.name !== m.label ? ' → ' + m.p.name : ''), t(ov.p[key] === 'show' ? 'st_forced_show' : m.manual ? 'st_p_manual' : 'st_p_shown') + (m.hidden ? t('st_hidden_control') : ''), 'ok'));
       });
       res.unmatched.forEach(function (c) { diag.push(pRow(c.name, t('st_p_unlinked'), 'err')); });
       var extra = 0;
@@ -759,7 +760,18 @@
   function matchParams (params, controls) {
     var taken = new Set(); var matched = []; var pending = controls.slice();
     var idOf = function (s) { return norm(String(s || '').replace(/^\[parameters\]\./i, '')); };
-    var take = function (p, c) { taken.add(paramKey(p)); matched.push({ p: p, order: c.order, label: c.name, hidden: !!c.hidden }); };
+    var take = function (p, c, manual) { taken.add(paramKey(p)); matched.push({ p: p, order: c.order, label: c.name, hidden: !!c.hidden, manual: !!manual }); };
+    // 1) Associations forcées dans Configure > Recap content
+    var pc = overrides().pc;
+    params.forEach(function (p) {
+      var m = pc[paramKey(p)];
+      if (!m) return;
+      if (m.id === 'none') { taken.add(paramKey(p)); return; } // « aucun contrôle » : pas d'association auto
+      var c = null;
+      for (var i = 0; i < pending.length && !c; i++) if (String(pending[i].id) === String(m.id)) c = pending[i];
+      for (var j = 0; j < pending.length && !c; j++) if (pending[j].name === m.name) c = pending[j];
+      if (c) { take(p, c, true); pending = pending.filter(function (x) { return x !== c; }); }
+    });
     var exactPasses = [
       function (p, c) { return c.fieldId && p.id && (c.fieldId === p.id || idOf(c.fieldId) === idOf(p.id)); },
       function (p, c) { return p.name === c.name; },
@@ -789,9 +801,10 @@
     return { matched: matched, unmatched: pending };
   }
 
+  // f/p : 'show'|'hide' ; pc : paramètre -> { id, name } du contrôle (ou { id: 'none' }) ; labels : clé -> libellé
   function overrides () {
     var o = cfg.overrides || {};
-    return { f: o.f || {}, p: o.p || {} };
+    return { f: o.f || {}, p: o.p || {}, pc: o.pc || {}, labels: o.labels || {} };
   }
 
   function syncParamListeners (matched) {
@@ -815,7 +828,7 @@
   function buildParamItem (p, order, label) {
     var cv = p.currentValue || {};
     var item = {
-      key: paramKey(p), kind: 'param', type: 'param', label: (label && String(label).trim()) || p.name, paramName: p.name, order: order, active: true,
+      key: paramKey(p), kind: 'param', type: 'param', label: overrides().labels[paramKey(p)] || (label && String(label).trim()) || p.name, paramName: p.name, order: order, active: true,
       dataType: p.dataType, text: cv.formattedValue != null ? String(cv.formattedValue) : '—'
     };
     var av = p.allowableValues;
@@ -1080,10 +1093,10 @@
     render(); // la tuile disparaît immédiatement ; Tableau confirme ensuite
     Promise.all(sheets.map(function (name) {
       var ws = findSheet(name);
-      return ws ? ws.clearFilterAsync(it.label).catch(function (e) { console.warn('[recap] clear', name, e); }) : null;
+      return ws ? ws.clearFilterAsync(it.fieldName || it.label).catch(function (e) { console.warn('[recap] clear', name, e); }) : null;
     })).then(function () {
       // Filet de sécurité si l'événement FilterChanged n'arrive pas.
-      schedule('field', { key: norm(it.label), ev: syntheticEvent(sheets[0], key) }, 300);
+      schedule('field', { key: norm(it.fieldName || it.label), ev: syntheticEvent(sheets[0], key) }, 300);
     });
   }
 
@@ -1115,7 +1128,7 @@
       markCleared(x[1]);
       (state.fieldSheets.get(x[1]) || []).forEach(function (name) {
         var ws = findSheet(name);
-        if (ws) jobs.push(ws.clearFilterAsync(x[0].label).catch(function (e) { console.warn('[recap] clear', name, e); }));
+        if (ws) jobs.push(ws.clearFilterAsync(x[0].fieldName || x[0].label).catch(function (e) { console.warn('[recap] clear', name, e); }));
       });
     });
     render();
@@ -1361,9 +1374,16 @@
       m.matched.forEach(function (x) { byKey.set(paramKey(x.p), x); });
       var params = res[1].map(function (p) {
         var x = byKey.get(paramKey(p));
-        return { key: paramKey(p), name: p.name, auto: x ? 'control' : 'nocontrol', control: x ? x.label : '', order: x ? x.order : 1000 };
+        return { key: paramKey(p), name: p.name, auto: x ? (x.manual ? 'manual' : 'control') : 'nocontrol', control: x ? x.label : '', order: x ? x.order : 1000 };
       }).sort(function (a, b) { return a.order - b.order || a.name.localeCompare(b.name); });
-      return { filters: filters, params: params, unlinked: m.unmatched.map(function (c) { return c.name; }) };
+      // Tous les contrôles du dashboard (même masqués) pour l'association manuelle
+      var controls = [];
+      dashboard.objects.forEach(function (o) {
+        if (o.type === T.DashboardObjectType.ParameterControl) controls.push({ id: o.id, name: o.name || ('#' + o.id), hidden: o.isVisible === false, position: o.position });
+      });
+      controls.sort(byPosition);
+      controls = controls.map(function (c) { return { id: c.id, name: c.name, hidden: c.hidden }; });
+      return { filters: filters, params: params, controls: controls, unlinked: m.unmatched.map(function (c) { return c.name; }) };
     });
   }
 

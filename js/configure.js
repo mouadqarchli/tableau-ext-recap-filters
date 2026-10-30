@@ -11,7 +11,7 @@
   var PALETTE = ['#ff6d00', '#111827', '#5b5fc7', '#0969da', '#0e9f6e', '#c2410c', '#be185d', '#7c3aed', '#b08d57'];
   var BOOLS = ['showParams', 'showReset', 'showExport', 'showInactive', 'showRatio', 'useWorkbookFont', 'includeHiddenCards', 'includeHiddenParams', 'checkAllSelected', 'ignoreNullOnly'];
   var inventory = null;
-  var ov = { f: {}, p: {} };
+  var ov = { f: {}, p: {}, pc: {}, labels: {} };
   var accent = DEFAULTS.accent;
   var I = window.RecapI18n;
   var t = I.make('en');
@@ -39,7 +39,7 @@
     BOOLS.forEach(function (k) { $(k).checked = !!c[k]; });
     setAccent(c.accent);
     var o = c.overrides || {};
-    ov = { f: assignObj({}, o.f), p: assignObj({}, o.p) };
+    ov = { f: assignObj({}, o.f), p: assignObj({}, o.p), pc: assignObj({}, o.pc), labels: assignObj({}, o.labels) };
     translate(c.language);
   }
 
@@ -50,7 +50,9 @@
     $('invMissing').hidden = !!inventory;
     if (!inventory) return;
     drawList($('ovFilters'), inventory.filters, 'f', function (it) { return t(it.auto === 'card' ? 'cf_auto_card' : 'cf_auto_nocard'); });
-    drawList($('ovParams'), inventory.params, 'p', function (it) { return it.auto === 'control' ? t('cf_auto_control', { c: it.control }) : t('cf_auto_nocontrol'); });
+    drawList($('ovParams'), inventory.params, 'p', function (it) {
+      return it.auto === 'manual' ? t('cf_auto_manual', { c: it.control }) : it.auto === 'control' ? t('cf_auto_control', { c: it.control }) : t('cf_auto_nocontrol');
+    });
     var un = inventory.unlinked || [];
     $('unlinked').hidden = !un.length;
     if (un.length) $('unlinked').textContent = t('cf_unlinked', { list: un.join(', ') });
@@ -76,9 +78,52 @@
         if (sel.value === 'auto') delete ov[kind][it.key]; else ov[kind][it.key] = sel.value;
         row.className = 'ov-row is-' + sel.value;
       });
-      row.appendChild(txt); row.appendChild(sel);
+      var top = document.createElement('div'); top.className = 'ov-row__top';
+      top.appendChild(txt); top.appendChild(sel);
+      row.appendChild(top);
+
+      var extra = document.createElement('div'); extra.className = 'ov-row__extra';
+      if (kind === 'p') extra.appendChild(controlPicker(it));
+      extra.appendChild(labelInput(it, kind));
+      row.appendChild(extra);
       wrap.appendChild(row);
     });
+  }
+
+  // Choix du contrôle qui pilote ce paramètre (prend sa place et son ordre dans le récap)
+  function controlPicker (it) {
+    var box = document.createElement('label'); box.className = 'ov-field';
+    var cap = document.createElement('span'); cap.textContent = t('cf_ctrl'); box.appendChild(cap);
+    var sel = document.createElement('select');
+    var add = function (v, txt) { var o = document.createElement('option'); o.value = v; o.textContent = txt; sel.appendChild(o); };
+    add('', t('cf_ctrl_auto'));
+    add('none', t('cf_ctrl_none'));
+    (inventory.controls || []).forEach(function (c) { add(String(c.id), c.name + (c.hidden ? t('cf_hidden_suffix') : '')); });
+    var cur = ov.pc[it.key];
+    sel.value = cur ? String(cur.id) : '';
+    if (cur && sel.value !== String(cur.id)) sel.value = ''; // contrôle disparu
+    sel.addEventListener('change', function () {
+      if (!sel.value) { delete ov.pc[it.key]; return; }
+      if (sel.value === 'none') { ov.pc[it.key] = { id: 'none' }; return; }
+      var c = (inventory.controls || []).filter(function (x) { return String(x.id) === sel.value; })[0];
+      ov.pc[it.key] = { id: c.id, name: c.name };
+    });
+    box.appendChild(sel);
+    return box;
+  }
+
+  function labelInput (it, kind) {
+    var box = document.createElement('label'); box.className = 'ov-field ov-field--grow';
+    var cap = document.createElement('span'); cap.textContent = t('cf_label'); box.appendChild(cap);
+    var inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 80;
+    inp.placeholder = kind === 'p' && it.control ? it.control : it.name;
+    inp.value = ov.labels[it.key] || '';
+    inp.addEventListener('input', function () {
+      var v = inp.value.trim();
+      if (v) ov.labels[it.key] = v; else delete ov.labels[it.key];
+    });
+    box.appendChild(inp);
+    return box;
   }
 
   function wireTabs () {
@@ -100,8 +145,8 @@
     c.layout = $('layout').value;
     c.maxChips = Math.min(20, Math.max(1, parseInt($('maxChips').value, 10) || DEFAULTS.maxChips));
     BOOLS.forEach(function (k) { c[k] = $(k).checked; });
-    var hasOv = Object.keys(ov.f).length || Object.keys(ov.p).length;
-    c.overrides = hasOv ? { f: ov.f, p: ov.p } : null;
+    var hasOv = Object.keys(ov.f).length || Object.keys(ov.p).length || Object.keys(ov.pc).length || Object.keys(ov.labels).length;
+    c.overrides = hasOv ? { f: ov.f, p: ov.p, pc: ov.pc, labels: ov.labels } : null;
     return c;
   }
 

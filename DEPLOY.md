@@ -11,5 +11,6 @@
 5. In Tableau Desktop: remove the localhost extension from the dashboard, add the new `RecapFiltres.trex`,
    reconfigure it if needed, then publish to Tableau Cloud.
 
-Updating: overwrite the files on the host and bump the `?v=` numbers in the .html files
-so browsers reload the new version. No republish needed unless the URL changes.
+Updating: overwrite the changed files (never RecapFiltres.trex nor lib/), then change the
+number in version.json and commit. Pages load version.json without cache, so users get the
+new version as soon as GitHub Pages has deployed. No republish needed unless the URL changes.

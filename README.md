@@ -1,4 +1,4 @@
-# Filters & parameters recap — Tableau dashboard extension (v2.4.0)
+# Filters & parameters recap — Tableau dashboard extension (v2.5.0)
 
 Shows a visual recap of **what the user has selected on the dashboard**, in English (default) or French, with a full **export**.
 
@@ -59,7 +59,13 @@ The Tableau library is found automatically in the folder's `lib/`, or else in th
 
 ## Recap content (per dashboard)
 
-Configure… > **Recap content** lists every filter of every sheet and every parameter of the workbook, with what the automatic mode does with it. Set any item to **Always show** or **Never show** to make the recap match the dashboard exactly (e.g. a parameter changed through a parameter action with no control, a technical parameter whose control sits in a hidden container). Choices are saved with this dashboard's extension.
+Configure… > **Recap content** lists every filter of every sheet and every parameter of the workbook, with what the automatic mode does with it. For each item you can:
+
+* **Display**: Auto / Always show / Never show;
+* **Control** (parameters): link the parameter to the control that drives it — useful when the control's name differs from the technical parameter name (e.g. `p__Catalog Season Code` driven by the "Catalog Season Code (Current Year)" control). The parameter then takes that control's place in the recap. "No control" prevents any automatic link;
+* **Label in the recap**: rename what the recap and the export display (e.g. the title shown above the control on the dashboard).
+
+Set items to **Always show** or **Never show** to make the recap match the dashboard exactly (e.g. a parameter changed through a parameter action with no control, a technical parameter whose control sits in a hidden container). Choices are saved with this dashboard's extension.
 
 Parameter controls are linked to their parameter by id when Tableau provides it, otherwise by exact name, then normalized name, then partial name **only when a single parameter matches** (an ambiguous control is reported in Diagnostics and in the Recap content tab instead of being linked to the wrong parameter).
 
@@ -74,6 +80,13 @@ In authoring mode, the bug button (or Ctrl+Alt+D) lists every filter of every sh
 * Layout events are ignored unless cards/controls actually changed; only sheets carrying the cards are re-read.
 * Domain queries run in the background (2 at a time, never ahead of a user action) and verdicts are cached for 12 h, as are totals, bounds and the last display (instant reopen).
 * Optimistic clearing, targeted DOM updates, loading bar only after 250 ms.
+
+## Publishing an update
+
+1. Replace the changed files in the repository (never `RecapFiltres.trex` nor `lib/`).
+2. Change the number in **`version.json`** (e.g. `{ "v": "2.4.2" }`) and commit.
+
+Every page reads `version.json` without cache on each load and loads CSS/JS with that version, so users get the new version as soon as GitHub Pages has deployed (about 1 minute; check the Actions tab). No need to touch the HTML files or republish the workbooks.
 
 ## Demo
 
