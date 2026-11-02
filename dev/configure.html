@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configure</title>
+  <!-- Chargement versionné : la version est lue dans version.json (jamais en cache),
+       puis CSS et scripts sont chargés avec ?v=<version>. Pour publier une mise à jour,
+       il suffit de changer version.json. -->
+  <style>body{visibility:hidden}</style>
+  <script>
+    (function () {
+      var CSS = ['css/app.css', 'css/configure.css'];
+      var JS = ['js/i18n.js', 'js/configure.js'];
+      var LIBS = ['lib/tableau.extensions.1.latest.min.js', '../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.js'];
+      var shown = false;
+      function show () { if (!shown && document.body) { shown = true; document.body.style.visibility = 'visible'; } }
+      function go (v) {
+        var q = '?v=' + encodeURIComponent(v);
+        var pending = CSS.length;
+        CSS.forEach(function (href) {
+          var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href + q;
+          l.onload = l.onerror = function () { if (--pending <= 0) show(); };
+          document.head.appendChild(l);
+        });
+        setTimeout(show, 1500);
+        var next = JS.map(function (s) { return s + q; });
+        function run () { var src = next.shift(); if (!src) return; var a = document.createElement('script'); a.src = src; a.onload = run; document.head.appendChild(a); }
+        (function lib (i) {
+          var s = document.createElement('script'); s.src = LIBS[i];
+          s.onload = run;
+          s.onerror = function () { s.remove(); if (i + 1 < LIBS.length) lib(i + 1); else run(); };
+          document.head.appendChild(s);
+        })(0);
+      }
+      var done = false;
+      function once (v) { if (!done) { done = true; go(v); } }
+      var hourly = function () { return 'h' + Math.floor(Date.now() / 36e5); };
+      try {
+        var x = new XMLHttpRequest();
+        x.open('GET', 'version.json?t=' + Date.now(), true);
+        x.timeout = 3000;
+        x.onload = function () { try { once(JSON.parse(x.responseText).v || hourly()); } catch (e) { once(hourly()); } };
+        x.onerror = x.ontimeout = function () { once(hourly()); };
+        x.send();
+      } catch (e) { once(hourly()); }
+    })();
+  </script>
+</head>
+<body class="cfg">
+  <form id="form" class="cfg__form" autocomplete="off">
+    <header class="cfg__head">
+      <h1 data-i18n="cf_title">Filters &amp; parameters recap</h1>
+      <p data-i18n="cf_intro">Appearance and behaviour of the extension.</p>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab is-active" data-tab="look" role="tab" data-i18n="cf_tab_look">Appearance</button>
+      <button type="button" class="tab" data-tab="content" role="tab" data-i18n="cf_tab_content">Recap content</button>
+      <button type="button" class="tab" data-tab="data" role="tab" data-i18n="cf_tab_data">Data export</button>
+    </nav>
+
+    <div class="cfg__body" data-panel="look">
+      <div class="row">
+        <label class="field">
+          <span class="field__label" data-i18n="cf_language">Language</span>
+          <select id="language">
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+            <option value="auto" data-i18n="cf_lang_auto">Automatic</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label" data-i18n="cf_title_label">Title</span>
+          <input id="title" type="text" maxlength="60">
+        </label>
+      </div>
+
+      <div class="field">
+        <span class="field__label" data-i18n="cf_accent">Accent colour</span>
+        <div class="swatches" id="swatches"></div>
+      </div>
+
+      <div class="row">
+        <label class="field">
+          <span class="field__label" data-i18n="cf_theme">Theme</span>
+          <select id="theme">
+            <option value="light" data-i18n="cf_theme_light">Light</option>
+            <option value="dark" data-i18n="cf_theme_dark">Dark</option>
+            <option value="transparent" data-i18n="cf_theme_transparent">Transparent</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label" data-i18n="cf_density">Density</span>
+          <select id="density">
+            <option value="comfortable" data-i18n="cf_density_comfortable">Comfortable</option>
+            <option value="compact" data-i18n="cf_density_compact">Compact</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="field">
+          <span class="field__label" data-i18n="cf_layout">Layout</span>
+          <select id="layout">
+            <option value="auto" data-i18n="cf_layout_auto">Automatic</option>
+            <option value="grid" data-i18n="cf_layout_grid">Cards</option>
+            <option value="bar" data-i18n="cf_layout_bar">Horizontal banner</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label" data-i18n="cf_maxchips">Visible values per filter</span>
+          <input id="maxChips" type="number" min="1" max="20" step="1">
+        </label>
+      </div>
+
+      <fieldset class="checks">
+        <label class="check"><input id="showParams" type="checkbox"><span data-i18n="cf_showParams"></span></label>
+        <label class="check"><input id="showReset" type="checkbox"><span data-i18n="cf_showReset"></span></label>
+        <label class="check"><input id="showExport" type="checkbox"><span data-i18n="cf_showExport"></span></label>
+        <label class="check"><input id="showRatio" type="checkbox"><span data-i18n="cf_showRatio"></span></label>
+        <label class="check"><input id="showInactive" type="checkbox"><span data-i18n="cf_showInactive"></span></label>
+        <label class="check"><input id="useWorkbookFont" type="checkbox"><span data-i18n="cf_useWorkbookFont"></span></label>
+        <label class="check"><input id="includeHiddenCards" type="checkbox"><span data-i18n="cf_includeHiddenCards"></span></label>
+        <label class="check"><input id="checkAllSelected" type="checkbox"><span data-i18n="cf_checkAllSelected"></span></label>
+        <label class="check"><input id="includeHiddenParams" type="checkbox"><span data-i18n="cf_includeHiddenParams"></span></label>
+        <label class="check"><input id="ignoreNullOnly" type="checkbox"><span data-i18n="cf_ignoreNullOnly"></span></label>
+      </fieldset>
+    </div>
+
+    <div class="cfg__body" data-panel="content" hidden>
+      <p class="cfg__note" data-i18n="cf_content_intro"></p>
+      <p id="unlinked" class="cfg__warn" hidden></p>
+      <p id="invMissing" class="cfg__warn" data-i18n="cf_inventory_missing" hidden></p>
+      <h2 class="cfg__h2" data-i18n="sec_filters">Filters</h2>
+      <div id="ovFilters" class="ov-list"></div>
+      <h2 class="cfg__h2" data-i18n="sec_params">Parameters</h2>
+      <div id="ovParams" class="ov-list"></div>
+    </div>
+
+    <div class="cfg__body" data-panel="data" hidden>
+      <label class="check"><input id="showDataExport" type="checkbox"><span data-i18n="cf_showDataExport"></span></label>
+      <p class="cfg__note" data-i18n="cf_data_intro"></p>
+      <div id="dataSheets" class="ov-list"></div>
+      <div class="row" style="margin-top:14px">
+        <label class="field">
+          <span class="field__label" data-i18n="cf_data_values">Default values in the export</span>
+          <select id="dataValues">
+            <option value="raw" data-i18n="dx_values_raw">Raw (numbers, dates)</option>
+            <option value="display" data-i18n="dx_values_display">As displayed</option>
+          </select>
+        </label>
+        <div></div>
+      </div>
+      <label class="field" style="max-width:240px">
+        <span class="field__label" data-i18n="cf_data_max">Maximum rows per sheet</span>
+        <input id="dataMaxRows" type="number" min="1000" max="1000000" step="1000">
+      </label>
+    </div>
+
+    <footer class="cfg__foot">
+      <button type="button" id="btnReset" class="btn btn--ghost" data-i18n="cf_defaults">Reset to defaults</button>
+      <span class="spacer"></span>
+      <button type="button" id="btnCancel" class="btn" data-i18n="cf_cancel">Cancel</button>
+      <button type="submit" class="btn btn--primary" data-i18n="cf_save">Save</button>
+    </footer>
+  </form>
+</body>
+</html>

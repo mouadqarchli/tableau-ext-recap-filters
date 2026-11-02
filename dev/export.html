@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Export</title>
+  <!-- Chargement versionné : la version est lue dans version.json (jamais en cache),
+       puis CSS et scripts sont chargés avec ?v=<version>. Pour publier une mise à jour,
+       il suffit de changer version.json. -->
+  <style>body{visibility:hidden}</style>
+  <script>
+    (function () {
+      var CSS = ['css/app.css', 'css/export.css'];
+      var JS = ['js/i18n.js', 'js/export.js'];
+      var LIBS = ['lib/tableau.extensions.1.latest.min.js', '../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.js'];
+      var shown = false;
+      function show () { if (!shown && document.body) { shown = true; document.body.style.visibility = 'visible'; } }
+      function go (v) {
+        var q = '?v=' + encodeURIComponent(v);
+        var pending = CSS.length;
+        CSS.forEach(function (href) {
+          var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href + q;
+          l.onload = l.onerror = function () { if (--pending <= 0) show(); };
+          document.head.appendChild(l);
+        });
+        setTimeout(show, 1500);
+        var next = JS.map(function (s) { return s + q; });
+        function run () { var src = next.shift(); if (!src) return; var a = document.createElement('script'); a.src = src; a.onload = run; document.head.appendChild(a); }
+        (function lib (i) {
+          var s = document.createElement('script'); s.src = LIBS[i];
+          s.onload = run;
+          s.onerror = function () { s.remove(); if (i + 1 < LIBS.length) lib(i + 1); else run(); };
+          document.head.appendChild(s);
+        })(0);
+      }
+      var done = false;
+      function once (v) { if (!done) { done = true; go(v); } }
+      var hourly = function () { return 'h' + Math.floor(Date.now() / 36e5); };
+      try {
+        var x = new XMLHttpRequest();
+        x.open('GET', 'version.json?t=' + Date.now(), true);
+        x.timeout = 3000;
+        x.onload = function () { try { once(JSON.parse(x.responseText).v || hourly()); } catch (e) { once(hourly()); } };
+        x.onerror = x.ontimeout = function () { once(hourly()); };
+        x.send();
+      } catch (e) { once(hourly()); }
+    })();
+  </script>
+</head>
+<body class="ex">
+  <header class="ex__bar">
+    <div class="ex__actions">
+      <button id="btnCopy" class="btn btn--primary" type="button" data-i18n="ex_copy">Copy as text</button>
+      <button id="btnCsv" class="btn" type="button" data-i18n="ex_csv">Download CSV</button>
+      <button id="btnTxt" class="btn" type="button" data-i18n="ex_txt">Download text</button>
+      <button id="btnPrint" class="btn" type="button" data-i18n="ex_print">Print / PDF</button>
+      <span class="spacer"></span>
+      <button id="btnClose" class="btn btn--ghost" type="button" data-i18n="close">Close</button>
+    </div>
+    <input id="search" class="ex__search" type="search" data-i18n-ph="ex_search" placeholder="Search a filter or a value…">
+  </header>
+
+  <main id="report" class="ex__report">
+    <header class="ex__head">
+      <p class="ex__kicker" data-i18n="ex_title">Filters &amp; parameters export</p>
+      <h1 id="exTitle"></h1>
+      <p id="exMeta" class="ex__meta"></p>
+    </header>
+    <section>
+      <h2 class="ex__h2"><span data-i18n="sec_filters">Filters</span> <span id="exFiltersCount" class="section__count"></span></h2>
+      <div id="exFilters"></div>
+    </section>
+    <section id="exParamsSection">
+      <h2 class="ex__h2"><span data-i18n="sec_params">Parameters</span> <span id="exParamsCount" class="section__count"></span></h2>
+      <div id="exParams"></div>
+    </section>
+    <p class="ex__hint" data-i18n="ex_download_hint"></p>
+  </main>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
