@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.7.1';
+  var VERSION = '2.8.0';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -37,6 +37,7 @@
     useWorkbookFont: true,
     includeHiddenCards: true, // cartes dans un conteneur replié (panneau de filtres)
     includeHiddenParams: true, // contrôles de paramètre dans un conteneur replié
+    sortOrder: 'alpha',       // alpha (ordre alphabétique) | dashboard (ordre du dashboard)
     showDataExport: true,     // bouton « Export data » (données des feuilles + récap)
     dataSheets: null,         // feuilles exportables (null = toutes les feuilles visibles)
     dataDefaults: null,       // feuilles cochées par défaut
@@ -100,6 +101,19 @@
     verdicts: new Map(),       // key|empreinte sélection -> { all, reason, missing, n }
     inflight: new Map()        // key|kind -> Promise
   };
+  // Durées des appels à Tableau (affichées dans le diagnostic)
+  var timings = [];
+  function timed (label, p) {
+    var t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+    var done = function () {
+      var t1 = (window.performance && performance.now) ? performance.now() : Date.now();
+      timings.push({ label: label, ms: Math.round(t1 - t0), at: Date.now() });
+      if (timings.length > 200) timings.splice(0, timings.length - 200);
+      if (state.diagOpen) scheduleRender();
+    };
+    return Promise.resolve(p).then(function (v) { done(); return v; }, function (e) { done(); throw e; });
+  }
+
   var listeners = {
     sheets: new Map(),         // worksheetName -> unregister
     params: new Map()          // paramKey -> unregister
@@ -355,10 +369,21 @@
     // fois précédente (souvent 1 ou 2 au lieu de tous).
     var routed = !forceAll && !state.diagOpen && state.routes &&
       exposure.cards.every(function (c) { return state.routes.cards.has(c.id); });
-    var targets = routed ? all.filter(function (ws) { return state.routes.sheets.has(ws.name); }) : all;
+    // Première lecture : d'abord les feuilles visibles du dashboard ; les feuilles
+    // techniques masquées ne sont lues que si une carte reste sans filtre.
+    var phase1 = !routed && !forceAll && !state.diagOpen;
+    var visibleNames = {};
+    if (phase1) {
+      dashboard.objects.forEach(function (o) {
+        if (o.type === T.DashboardObjectType.Worksheet && o.isVisible !== false) visibleNames[o.worksheet ? o.worksheet.name : o.name] = true;
+      });
+    }
+    var targets = routed ? all.filter(function (ws) { return state.routes.sheets.has(ws.name); }) :
+      phase1 ? all.filter(function (ws) { return visibleNames[ws.name]; }) : all;
+    var scanStart = Date.now();
 
     var filtersP = Promise.all(targets.map(function (ws) {
-      return ws.getFiltersAsync().then(
+      return timed(t('tm_filters', { s: ws.name }), ws.getFiltersAsync()).then(
         function (fs) { return { ws: ws, fs: fs }; },
         function (err) { console.warn('[recap] getFiltersAsync', ws.name, err); return { ws: ws, fs: [], err: err }; }
       );
@@ -397,7 +422,8 @@
 
       // Cartes sans filtre correspondant trouvé en mode routé : relecture complète.
       var forcedMissing = Object.keys(ov.f).some(function (k) { return ov.f[k] === 'show' && !byKey.has(k); });
-      if (routed && (matchedCards.size < exposure.cards.length || forcedMissing)) { state.routes = null; return fullScan(false, true); }
+      if ((routed || phase1) && (matchedCards.size < exposure.cards.length || forcedMissing)) { state.routes = null; return fullScan(false, true); }
+      timings.push({ label: t('tm_scan', { n: targets.length, total: all.length }), ms: Date.now() - scanStart, at: Date.now() });
 
       var fMap = new Map(); var objs = new Map(); var names = new Set();
       byKey.forEach(function (x, key) {
@@ -416,7 +442,7 @@
       });
 
       // Conserve les feuilles connues pour « effacer » quand la lecture est routée.
-      if (routed) state.fieldSheets.forEach(function (v, k) { if (!fieldSheets.has(k)) fieldSheets.set(k, v); });
+      if (routed || phase1) state.fieldSheets.forEach(function (v, k) { if (!fieldSheets.has(k)) fieldSheets.set(k, v); });
 
       state.filters = fMap;
       state.filterObjs = objs;
@@ -519,12 +545,13 @@
 
     if (exclude) {
       item.active = true;
-      if (count === undefined && cfg.showRatio) item.needs = 'ratio';
+      if (count === undefined && cfg.showRatio && !overrides().nc[key]) item.needs = 'ratio';
       return finalize(item);
     }
 
-    if (!cfg.checkAllSelected) {
+    if (!cfg.checkAllSelected || overrides().nc[key]) {
       item.active = true;
+      if (overrides().nc[key]) { item.total = count != null ? count : undefined; return finalize(item); } // aucune requête de valeurs
       if (count === undefined && cfg.showRatio) item.needs = 'ratio';
       return finalize(item);
     }
@@ -538,7 +565,7 @@
     if (!v) {
       if (values.length === 1) {
         item.active = true; // une seule valeur retenue : forcément restrictif, affiché tout de suite
-        if (count === undefined && cfg.showRatio) item.needs = 'ratio';
+        if (count === undefined && cfg.showRatio && !overrides().nc[key]) item.needs = 'ratio';
         return finalize(item);
       }
       item.active = true; item.pending = true; item.needs = 'verdict';
@@ -586,7 +613,7 @@
     if (item.min == null && item.max == null) { item.active = false; return finalize(item); }
     item.active = true;
     var d = domainPeek(base.key, 'range');
-    if (d === undefined) { item.needs = 'range'; return finalize(item); }
+    if (d === undefined) { if (!overrides().nc[base.key]) item.needs = 'range'; return finalize(item); }
     if (d) {
       var a = item.min != null ? toNum(min.value) : d.lo;
       var b = item.max != null ? toNum(max.value) : d.hi;
@@ -642,7 +669,7 @@
     if (caches.inflight.has(k)) return caches.inflight.get(k);
     var p = new Promise(function (resolve) {
       var task = function () {
-        return f.getDomainAsync(T.FilterDomainType.Database).then(function (d) {
+        return timed(t('tm_domain', { f: f.fieldName }), f.getDomainAsync(T.FilterDomainType.Database)).then(function (d) {
           if (kind === 'range') { caches.domain.set(k, rangeInfo(d)); return; }
           var vals = []; var nulls = new Set();
           ((d && d.values) || []).forEach(function (dv) {
@@ -741,7 +768,7 @@
     var ov = overrides();
     var anyForced = Object.keys(ov.p).some(function (k) { return ov.p[k] === 'show'; });
     if (!controls.length && !anyForced) { syncParamListeners([]); state.paramDiag = []; return Promise.resolve([]); }
-    return dashboard.getParametersAsync().then(function (params) {
+    return timed(t('tm_params'), dashboard.getParametersAsync()).then(function (params) {
       var res = matchParams(params, controls);
       var diag = [];
       var shown = [];
@@ -822,7 +849,7 @@
   // f/p : 'show'|'hide' ; pc : paramètre -> { id, name } du contrôle (ou { id: 'none' }) ; labels : clé -> libellé
   function overrides () {
     var o = cfg.overrides || {};
-    return { f: o.f || {}, p: o.p || {}, pc: o.pc || {}, labels: o.labels || {} };
+    return { f: o.f || {}, p: o.p || {}, pc: o.pc || {}, labels: o.labels || {}, nc: o.nc || {} };
   }
 
   function syncParamListeners (matched) {
@@ -917,7 +944,9 @@
   function sortedVisible (map, pred) {
     var arr = [];
     map.forEach(function (it) { if (!pred || pred(it)) arr.push(it); });
-    arr.sort(function (a, b) { return a.order - b.order || a.label.localeCompare(b.label); });
+    var coll = window.Intl && Intl.Collator ? new Intl.Collator(t.lang, { numeric: true, sensitivity: 'base' }) : null;
+    var byLabel = function (a, b) { return coll ? coll.compare(a.label, b.label) : a.label.localeCompare(b.label); };
+    arr.sort(cfg.sortOrder === 'dashboard' ? function (a, b) { return a.order - b.order || byLabel(a, b); } : byLabel);
     return arr;
   }
 
@@ -1264,8 +1293,6 @@
    * aucune permission « full data » n'est nécessaire.
    * ===================================================================== */
   var dx = { busy: false };
-  var MN_RE = /^(measure names|noms? de mesures?)$/i;
-  var MV_RE = /^(measure values|valeurs? de mesures?)$/i;
 
   function exportableSheets () {
     var DOT = T.DashboardObjectType; var list = []; var seen = {};
@@ -1327,9 +1354,9 @@
         var ws = findSheet(name);
         if (!ws) throw new Error(t('dx_sheet_missing', { s: name }));
         dxStatus(t('dx_reading', { s: name, n: 0 }), '');
-        return readSheetData(ws, maxRows, function (n, total) {
+        return timed(t('tm_export', { s: name }), readSheetData(ws, maxRows, function (n, total) {
           dxStatus(t('dx_reading', { s: name, n: n.toLocaleString() + (total ? ' / ' + total.toLocaleString() : '') }), '');
-        }).then(function (d) {
+        })).then(function (d) {
           return vizSpec(ws).then(function (spec) {
             var tb = shapeTable(toTable(d, valMode), spec, (cfg.dataColumns || {})[name]);
             tb.name = name; tables.push(tb);
@@ -1365,174 +1392,10 @@
   }
 
   // Lecture paginée (Tableau 2022.4+), repli sur getSummaryDataAsync
-  function readSheetData (ws, maxRows, onProgress, pageSize) {
-    var opts = { ignoreSelection: true };
-    var legacy = function () {
-      return ws.getSummaryDataAsync(assign({ maxRows: maxRows }, opts)).then(function (tb) {
-        onProgress(tb.data.length, tb.totalRowCount);
-        return { cols: tb.columns, rows: tb.data, truncated: tb.totalRowCount > tb.data.length };
-      });
-    };
-    if (typeof ws.getSummaryDataReaderAsync === 'function') {
-      return ws.getSummaryDataReaderAsync(pageSize || 10000, opts).catch(function (err) {
-        console.warn('[recap] summary reader unavailable, fallback', err);
-        return null;
-      }).then(function (reader) {
-        if (!reader) return legacy();
-        var cols = null; var rows = []; var truncated = false;
-        var page = function (i) {
-          if (i >= reader.pageCount || rows.length >= maxRows) return Promise.resolve();
-          return reader.getPageAsync(i).then(function (tb) {
-            if (!cols) cols = tb.columns;
-            for (var r = 0; r < tb.data.length; r++) { if (rows.length >= maxRows) { truncated = true; break; } rows.push(tb.data[r]); }
-            onProgress(rows.length, reader.totalRowCount);
-            return page(i + 1);
-          });
-        };
-        var release = function () { return Promise.resolve(reader.releaseAsync ? reader.releaseAsync() : null).catch(function () {}); };
-        return page(0).then(function () {
-          return release().then(function () {
-            return { cols: cols || [], rows: rows, truncated: truncated || reader.totalRowCount > rows.length };
-          });
-        }, function (err) { return release().then(function () { throw err; }); });
-      });
-    }
-    return ws.getSummaryDataAsync(assign({ maxRows: maxRows }, opts)).then(function (tb) {
-      onProgress(tb.data.length, tb.totalRowCount);
-      return { cols: tb.columns, rows: tb.data, truncated: tb.totalRowCount > tb.data.length };
-    });
-  }
-
-  // Valeurs typées (nombres, dates, booléens) ; Measure Names/Values remis en colonnes
-  function toTable (d, valMode) {
-    var display = valMode === 'display';
-    var cols = d.cols.slice().sort(function (a, b) { return a.index - b.index; });
-    var mn = -1; var mv = -1;
-    cols.forEach(function (c, i) { if (MN_RE.test(c.fieldName)) mn = i; else if (MV_RE.test(c.fieldName)) mv = i; });
-    var conv = function (dv, col) {
-      if (!dv) return null;
-      var v = dv.value; var f = dv.formattedValue;
-      if (v == null || v === '%null%' || (f === 'Null' && (v === '' || v == null))) return display && f ? String(f) : null;
-      if (display) return f != null ? String(f) : String(v);
-      switch (col.dataType) {
-        case 'int': case 'float': { var n = typeof v === 'number' ? v : Number(v); return isFinite(n) ? n : f; }
-        case 'bool': return v === true || v === 'true' || v === 1;
-        case 'date': case 'date-time': { var dt = toDate(v); return dt || f; }
-        default: return f != null && f !== '' ? String(f) : String(v);
-      }
-    };
-    if (mn === -1 || mv === -1) {
-      return {
-        header: cols.map(function (c) { return c.fieldName; }),
-        measures: [],
-        rows: d.rows.map(function (row) { return cols.map(function (c) { return conv(row[c.index], c); }); }),
-        truncated: d.truncated
-      };
-    }
-    var dims = cols.filter(function (c, i) { return i !== mn && i !== mv; });
-    var mnCol = cols[mn]; var mvCol = cols[mv];
-    var measures = []; var mIdx = {}; var groups = new Map(); var order = [];
-    d.rows.forEach(function (row) {
-      var mName = String(row[mnCol.index] ? row[mnCol.index].formattedValue : '');
-      if (!(mName in mIdx)) { mIdx[mName] = measures.length; measures.push(mName); }
-      var key = dims.map(function (c) { var x = row[c.index]; return x ? String(x.value) : ''; }).join('\u0001');
-      var g = groups.get(key);
-      if (!g) { g = { dims: dims.map(function (c) { return conv(row[c.index], c); }), vals: {} }; groups.set(key, g); order.push(key); }
-      g.vals[mName] = conv(row[mvCol.index], mvCol);
-    });
-    return {
-      header: dims.map(function (c) { return c.fieldName; }).concat(measures),
-      measures: measures.slice(),
-      rows: order.map(function (k) { var g = groups.get(k); return g.dims.concat(measures.map(function (m) { return g.vals[m] == null ? null : g.vals[m]; })); }),
-      truncated: d.truncated
-    };
-  }
-
-  // Structure visuelle de la feuille (Tableau 2023.3+ / API 1.11) : ordre des
-  // champs en lignes/colonnes, champs seulement en Détail/Info-bulle.
-  function vizSpec (ws) {
-    if (typeof ws.getVisualSpecificationAsync !== 'function') return Promise.resolve(null);
-    return ws.getVisualSpecificationAsync().then(function (spec) {
-      if (!spec) return null;
-      var nm = function (f) { return f ? String(f.name || f.fieldName || f.fieldId || '') : ''; };
-      var shelf = [];
-      (spec.rowFields || []).forEach(function (f) { shelf.push(nm(f)); });
-      (spec.columnFields || []).forEach(function (f) { shelf.push(nm(f)); });
-      var ms = (spec.marksSpecifications || [])[spec.activeMarksSpecificationIndex || 0] || {};
-      var other = []; var hiddenOnly = [];
-      (ms.encodings || []).forEach(function (e) {
-        var ty = String(e.type || '').toLowerCase();
-        (ty === 'detail' || ty === 'tooltip' ? hiddenOnly : other).push(nm(e.field));
-      });
-      return { shelf: shelf, other: other, hiddenOnly: hiddenOnly };
-    }, function () { return null; });
-  }
-
-  function fieldKey (name) { return norm(String(name || '').replace(/^[A-Za-z]+\((.*)\)$/, '$1')); }
-
-  // Ordre et choix des colonnes : réglage manuel (Configure > Data export)
-  // sinon automatique (lignes, colonnes, autres encodages, puis mesures ;
-  // champs uniquement en Détail/Info-bulle exclus).
-  function autoColumns (tb, spec) {
-    var cols = tb.header.map(function (n, i) { return { n: n, i: i, on: true, rank: 500 + i }; });
-    if (!spec) return cols;
-    var pos = function (list, n) {
-      var k = fieldKey(n);
-      for (var i = 0; i < list.length; i++) if (fieldKey(list[i]) === k) return i;
-      return -1;
-    };
-    var isMeasure = {}; tb.measures.forEach(function (m) { isMeasure[m] = true; });
-    cols.forEach(function (c) {
-      if (isMeasure[c.n]) { c.rank = 1000 + c.i; return; } // ordre des mesures : non fourni par l'API -> réglage manuel
-      var a = pos(spec.shelf, c.n); var b = pos(spec.other, c.n); var z = pos(spec.hiddenOnly, c.n);
-      if (a !== -1) c.rank = a;
-      else if (b !== -1) c.rank = 100 + b;
-      else if (z !== -1) { c.on = false; c.rank = 3000 + c.i; }
-    });
-    return cols.sort(function (x, y) { return x.rank - y.rank; });
-  }
-
-  function shapeTable (tb, spec, manual) {
-    var auto = autoColumns(tb, spec);
-    var plan;
-    if (Array.isArray(manual) && manual.length) {
-      var byName = {}; auto.forEach(function (c) { byName[c.n] = c; });
-      var used = {};
-      plan = [];
-      manual.forEach(function (m) {
-        var c = byName[m.n];
-        if (!c || used[m.n]) return;
-        used[m.n] = true;
-        if (m.on !== false) plan.push({ i: c.i, label: m.l || c.n });
-      });
-      auto.forEach(function (c) { if (!used[c.n] && c.on) plan.push({ i: c.i, label: c.n }); }); // nouvelles colonnes
-    } else {
-      plan = auto.filter(function (c) { return c.on; }).map(function (c) { return { i: c.i, label: c.n }; });
-    }
-    return {
-      header: plan.map(function (p) { return p.label; }),
-      rows: tb.rows.map(function (r) { return plan.map(function (p) { return r[p.i]; }); }),
-      truncated: tb.truncated
-    };
-  }
-
-  // Colonnes détectées (échantillon) pour l'onglet Data export de Configure
-  // Lecture séquentielle (Tableau n'accepte qu'un lecteur de données actif à la fois)
-  function sheetColumns (ws) {
-    return readSheetData(ws, 2000, function () {}, 2000).then(function (d) {
-      return vizSpec(ws).then(function (spec) {
-        var tb = toTable(d, 'raw');
-        return autoColumns(tb, spec).map(function (c) { return { n: c.n, on: c.on }; });
-      });
-    });
-  }
-
-  function toDate (v) {
-    if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
-    var m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(String(v));
-    if (!m) return null;
-    return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
-  }
+  // Lecture des données de feuille : module partagé avec la fenêtre de configuration
+  var RS = window.RecapSheet;
+  var readSheetData = RS.readSheetData; var toTable = RS.toTable; var vizSpec = RS.vizSpec;
+  var shapeTable = RS.shapeTable; var sheetColumns = RS.sheetColumns;
 
   function recapLines (report) {
     var out = [];
@@ -1656,6 +1519,19 @@
     el.diagBody.appendChild(h('p', 'diag__hint',
       t('diag_hint', { cards: exposureObjects().qf.length, sheets: dashboard.worksheets.length })));
     el.diagBody.appendChild(table);
+    if (timings.length) {
+      var slow = timings.slice().sort(function (a, b) { return b.ms - a.ms; }).slice(0, 25);
+      el.diagBody.appendChild(h('p', 'diag__hint diag__sub', t('tm_title')));
+      var tt = h('table', 'diag__table');
+      var th = h('tr'); th.appendChild(h('th', null, t('tm_step'))); th.appendChild(h('th', 'num', t('tm_ms'))); tt.appendChild(th);
+      slow.forEach(function (x) {
+        var tr = h('tr', x.ms >= 2000 ? 'is-err' : x.ms >= 500 ? 'is-warn' : 'is-off');
+        tr.appendChild(h('td', null, x.label)); tr.appendChild(h('td', 'num', (x.ms / 1000).toFixed(2) + ' s'));
+        tt.appendChild(tr);
+      });
+      el.diagBody.appendChild(tt);
+      if (window.console && console.table) console.table(slow);
+    }
     if (window.console && console.table) console.table(rows);
   }
 
@@ -1729,7 +1605,7 @@
 
   function openConfig () {
     var url = new URL('configure.html', window.location.href).href;
-    return buildInventory().catch(function (e) { console.warn('[recap] inventory', e); return null; }).then(function (inv) {
+    return timed(t('tm_inventory'), buildInventory()).catch(function (e) { console.warn('[recap] inventory', e); return null; }).then(function (inv) {
       return T.extensions.ui.displayDialogAsync(url, JSON.stringify({ cfg: cfg, inventory: inv }), { width: 560, height: 720 });
     }).then(function () { loadSettings(); applyAppearance(); render(); })
       .catch(function (err) {
@@ -1745,8 +1621,8 @@
     var exposure = readExposure();
     var sheets = dashboard.worksheets;
     return Promise.all([
-      Promise.all(sheets.map(function (ws) { return ws.getFiltersAsync().catch(function () { return []; }); })),
-      dashboard.getParametersAsync()
+      Promise.all(sheets.map(function (ws) { return timed(t('tm_filters', { s: ws.name }), ws.getFiltersAsync()).catch(function () { return []; }); })),
+      timed(t('tm_params'), dashboard.getParametersAsync())
     ]).then(function (res) {
       var seen = new Map();
       res[0].forEach(function (fs) {
@@ -1779,20 +1655,8 @@
         if (!n || seenWs[n]) return;
         seenWs[n] = true; worksheets.push({ name: n, hidden: o.isVisible === false });
       });
-      var chain = Promise.resolve();
-      worksheets.forEach(function (w) {
-        var ws = findSheet(w.name);
-        if (w.hidden || !ws || !cfg.showDataExport) return;
-        chain = chain.then(function () {
-          return sheetColumns(ws).then(function (cols) { w.columns = cols; }, function (err) {
-            w.columnsError = errText(err);
-            console.warn('[recap] columns', w.name, err);
-          });
-        });
-      });
-      return chain.then(function () {
-        return { filters: filters, params: params, controls: controls, worksheets: worksheets, unlinked: m.unmatched.map(function (c) { return c.name; }) };
-      });
+      // Les colonnes de chaque feuille sont lues à la demande dans la fenêtre de configuration
+      return { filters: filters, params: params, controls: controls, worksheets: worksheets, unlinked: m.unmatched.map(function (c) { return c.name; }) };
     });
   }
 
@@ -1902,7 +1766,7 @@
   window.addEventListener('resize', function () { if (cfg.layout === 'auto') applyLayout(); });
 
   // Expose quelques fonctions pures pour les tests (sans effet en production).
-  window.__recap = { dataExport: function (m) { return runDataExport(m); }, toTable: function (d) { return toTable(d); }, inventory: function () { return buildInventory(); }, report: function () { return reportToText(buildReport(), t); }, buildReport: function () { return buildReport(); }, version: VERSION, relativeLabel: function (a, b, c) { return t.relative(a, b, c); }, matchParams: matchParams, norm: norm, toNum: toNum, isGeneratedName: isGeneratedName };
+  window.__recap = { timings: function () { return timings.slice(); }, dataExport: function (m) { return runDataExport(m); }, toTable: function (d) { return toTable(d); }, inventory: function () { return buildInventory(); }, report: function () { return reportToText(buildReport(), t); }, buildReport: function () { return buildReport(); }, version: VERSION, relativeLabel: function (a, b, c) { return t.relative(a, b, c); }, matchParams: matchParams, norm: norm, toNum: toNum, isGeneratedName: isGeneratedName };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

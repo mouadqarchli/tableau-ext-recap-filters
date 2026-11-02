@@ -11,7 +11,7 @@
   <script>
     (function () {
       var CSS = ['css/app.css', 'css/configure.css'];
-      var JS = ['js/i18n.js', 'js/configure.js'];
+      var JS = ['js/i18n.js', 'js/sheetdata.js', 'js/configure.js'];
       var LIBS = ['lib/tableau.extensions.1.latest.min.js', '../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.js'];
       var shown = false;
       function show () { if (!shown && document.body) { shown = true; document.body.style.visibility = 'visible'; } }
@@ -112,6 +112,17 @@
           <span class="field__label" data-i18n="cf_maxchips">Visible values per filter</span>
           <input id="maxChips" type="number" min="1" max="20" step="1">
         </label>
+      </div>
+
+      <div class="row">
+        <label class="field">
+          <span class="field__label" data-i18n="cf_sort">Order of filters and parameters</span>
+          <select id="sortOrder">
+            <option value="alpha" data-i18n="cf_sort_alpha">Alphabetical</option>
+            <option value="dashboard" data-i18n="cf_sort_dashboard">Dashboard order</option>
+          </select>
+        </label>
+        <div></div>
       </div>
 
       <fieldset class="checks">

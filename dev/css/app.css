@@ -371,6 +371,9 @@ html, body {
 .diag__table td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .diag__table tr.is-ok td:last-child { color: var(--success); font-weight: 600; }
 .diag__table tr.is-err td:last-child { color: var(--danger); font-weight: 600; }
+.diag__table tr.is-warn td:last-child { color: var(--c-date); font-weight: 600; }
+.diag__table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.diag__sub { margin-top: 12px !important; font-weight: 650; color: var(--text); }
 .is-bar .diag { display: none; }
 
 .toast {

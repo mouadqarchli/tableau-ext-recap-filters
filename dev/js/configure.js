@@ -6,13 +6,13 @@
     title: '', language: 'en', accent: '#ff6d00', theme: 'light', density: 'comfortable', layout: 'auto',
     showParams: true, showReset: true, showExport: true, showInactive: false, showRatio: true, maxChips: 4,
     useWorkbookFont: true, includeHiddenCards: true, includeHiddenParams: true, checkAllSelected: true, ignoreNullOnly: true,
-    overrides: null, showDataExport: true, dataSheets: null, dataDefaults: null, dataMaxRows: 200000, dataColumns: null, dataValues: 'raw'
+    overrides: null, showDataExport: true, dataSheets: null, dataDefaults: null, dataMaxRows: 200000, dataColumns: null, dataValues: 'raw', sortOrder: 'alpha'
   };
   var PALETTE = ['#ff6d00', '#111827', '#5b5fc7', '#0969da', '#0e9f6e', '#c2410c', '#be185d', '#7c3aed', '#b08d57'];
   var BOOLS = ['showDataExport', 'showParams', 'showReset', 'showExport', 'showInactive', 'showRatio', 'useWorkbookFont', 'includeHiddenCards', 'includeHiddenParams', 'checkAllSelected', 'ignoreNullOnly'];
   var inventory = null;
   var dataSel = { sheets: null, defaults: null, columns: {} };
-  var ov = { f: {}, p: {}, pc: {}, labels: {} };
+  var ov = { f: {}, p: {}, pc: {}, labels: {}, nc: {} };
   var accent = DEFAULTS.accent;
   var I = window.RecapI18n;
   var t = I.make('en');
@@ -40,11 +40,12 @@
     BOOLS.forEach(function (k) { $(k).checked = !!c[k]; });
     setAccent(c.accent);
     $('dataMaxRows').value = c.dataMaxRows || DEFAULTS.dataMaxRows;
+    $('sortOrder').value = c.sortOrder === 'dashboard' ? 'dashboard' : 'alpha';
     dataSel = { sheets: Array.isArray(c.dataSheets) ? c.dataSheets.slice() : null, defaults: Array.isArray(c.dataDefaults) ? c.dataDefaults.slice() : null,
       columns: JSON.parse(JSON.stringify(c.dataColumns || {})) };
     $('dataValues').value = c.dataValues === 'display' ? 'display' : 'raw';
     var o = c.overrides || {};
-    ov = { f: assignObj({}, o.f), p: assignObj({}, o.p), pc: assignObj({}, o.pc), labels: assignObj({}, o.labels) };
+    ov = { f: assignObj({}, o.f), p: assignObj({}, o.p), pc: assignObj({}, o.pc), labels: assignObj({}, o.labels), nc: assignObj({}, o.nc) };
     translate(c.language);
   }
 
@@ -66,6 +67,7 @@
 
   function drawList (wrap, items, kind, autoText) {
     wrap.textContent = '';
+    items = items.slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name), t.lang, { numeric: true, sensitivity: 'base' }); });
     if (!items.length) { var e = document.createElement('div'); e.className = 'ov-empty'; e.textContent = '—'; wrap.appendChild(e); return; }
     items.forEach(function (it) {
       var row = document.createElement('div');
@@ -91,6 +93,13 @@
       var extra = document.createElement('div'); extra.className = 'ov-row__extra';
       if (kind === 'p') extra.appendChild(controlPicker(it));
       extra.appendChild(labelInput(it, kind));
+      if (kind === 'f') {
+        var nc = document.createElement('label'); nc.className = 'check check--inline ov-nc'; nc.title = t('cf_nc_hint');
+        var ncb = document.createElement('input'); ncb.type = 'checkbox'; ncb.checked = !!ov.nc[it.key];
+        ncb.addEventListener('change', function () { if (ncb.checked) ov.nc[it.key] = true; else delete ov.nc[it.key]; });
+        var ns = document.createElement('span'); ns.textContent = t('cf_nc');
+        nc.appendChild(ncb); nc.appendChild(ns); extra.appendChild(nc);
+      }
       row.appendChild(extra);
       wrap.appendChild(row);
     });
@@ -134,64 +143,112 @@
   }
 
   // Éditeur de colonnes d'une feuille : inclure, renommer, réordonner
+  // Lecture des colonnes à la demande (une feuille à la fois : Tableau n'accepte
+  // qu'un lecteur de données actif). La fenêtre de configuration a accès au dashboard.
+  var colQueue = Promise.resolve();
+  function loadColumns (w) {
+    if (w._loading) return w._loading;
+    var p = colQueue.then(function () {
+      var dash = null;
+      try { dash = tableau.extensions.dashboardContent.dashboard; } catch (e) { dash = null; }
+      if (!dash) throw new Error(t('cf_cols_noapi'));
+      var ws = dash.worksheets.filter(function (x) { return x.name === w.name; })[0];
+      if (!ws) throw new Error(t('dx_sheet_missing', { s: w.name }));
+      return window.RecapSheet.sheetColumns(ws);
+    }).then(function (cols) { w.columns = cols; w.columnsError = null; }, function (err) {
+      w.columns = null; w.columnsError = (err && (err.message || String(err))) || 'error';
+    });
+    colQueue = p.then(function () {}, function () {});
+    w._loading = p.then(function () { w._loading = null; });
+    return w._loading;
+  }
+
   function columnsEditor (w) {
     var box = document.createElement('details'); box.className = 'cols';
     var sum = document.createElement('summary');
-    var manual = dataSel.columns[w.name];
-    sum.textContent = t('cf_data_columns') + (manual ? '' : ' — ' + t('cf_data_columns_auto'));
-    box.appendChild(sum);
-    if (!w.columns || !w.columns.length) {
-      var e = document.createElement('p'); e.className = 'cfg__warn'; e.textContent = t('cf_data_columns_none') + (w.columnsError ? ' (' + w.columnsError + ')' : ''); box.appendChild(e); return box;
-    }
-    var hint = document.createElement('p'); hint.className = 'cfg__note'; hint.textContent = t('cf_data_columns_hint'); box.appendChild(hint);
-    // Liste de travail : réglage manuel existant + colonnes détectées absentes
-    var list = (manual || []).map(function (m) { return { n: m.n, l: m.l || '', on: m.on !== false }; });
-    w.columns.forEach(function (c) { if (!list.some(function (x) { return x.n === c.n; })) list.push({ n: c.n, l: '', on: c.on }); });
-    var ul = document.createElement('div'); ul.className = 'cols__list'; box.appendChild(ul);
+    var body = document.createElement('div'); body.className = 'cols__body';
+    var setSum = function () { sum.textContent = t('cf_data_columns') + (dataSel.columns[w.name] ? '' : ' — ' + t('cf_data_columns_auto')); };
+    setSum();
+    box.appendChild(sum); box.appendChild(body);
     var dragFrom = null;
-    var save = function () { dataSel.columns[w.name] = list.map(function (x) { var o = { n: x.n, on: x.on }; if (x.l) o.l = x.l; return o; }); sum.textContent = t('cf_data_columns'); };
-    var draw = function () {
-      ul.textContent = '';
-      list.forEach(function (x, i) {
-        var r = document.createElement('div'); r.className = 'cols__row' + (x.on ? '' : ' is-off');
-        // Glisser-déposer pour réordonner rapidement
-        r.draggable = true;
-        r.addEventListener('dragstart', function (e) { dragFrom = i; r.classList.add('is-drag'); try { e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; } catch (er) { /* ignore */ } });
-        r.addEventListener('dragend', function () { r.classList.remove('is-drag'); });
-        r.addEventListener('dragover', function (e) { e.preventDefault(); r.classList.add('is-over'); });
-        r.addEventListener('dragleave', function () { r.classList.remove('is-over'); });
-        r.addEventListener('drop', function (e) {
-          e.preventDefault(); r.classList.remove('is-over');
-          if (dragFrom == null || dragFrom === i) return;
-          var item = list.splice(dragFrom, 1)[0]; list.splice(i, 0, item); dragFrom = null; save(); draw();
-        });
-        var grip = document.createElement('span'); grip.className = 'cols__grip'; grip.textContent = '⋮⋮'; r.appendChild(grip);
-        var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = x.on;
-        cb.addEventListener('change', function () { x.on = cb.checked; save(); draw(); });
-        var name = document.createElement('span'); name.className = 'cols__name'; name.textContent = x.n; name.title = x.n;
-        var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = x.n; inp.value = x.l; inp.maxLength = 80;
-        inp.addEventListener('input', function () { x.l = inp.value.trim(); save(); });
-        var mv = function (d, label, txt) {
-          var b = document.createElement('button'); b.type = 'button'; b.className = 'cols__btn'; b.textContent = txt; b.title = label;
-          b.disabled = (d < 0 && i === 0) || (d > 0 && i === list.length - 1);
-          b.addEventListener('click', function () { var tmp = list[i]; list[i] = list[i + d]; list[i + d] = tmp; save(); draw(); });
-          return b;
-        };
-        r.appendChild(cb); r.appendChild(name); r.appendChild(inp); r.appendChild(mv(-1, t('cf_up'), '↑')); r.appendChild(mv(1, t('cf_down'), '↓'));
-        ul.appendChild(r);
-      });
+    var list = null;
+
+    var buildList = function () {
+      var manual = dataSel.columns[w.name];
+      list = (manual || []).map(function (m) { return { n: m.n, l: m.l || '', on: m.on !== false }; });
+      (w.columns || []).forEach(function (c) { if (!list.some(function (x) { return x.n === c.n; })) list.push({ n: c.n, l: '', on: c.on }); });
     };
-    draw();
-    var reset = document.createElement('button'); reset.type = 'button'; reset.className = 'btn btn--ghost cols__reset'; reset.textContent = t('cf_data_reset');
-    reset.addEventListener('click', function () {
-      delete dataSel.columns[w.name];
-      list = w.columns.map(function (c) { return { n: c.n, l: '', on: c.on }; });
-      sum.textContent = t('cf_data_columns') + ' — ' + t('cf_data_columns_auto');
+    var save = function () { dataSel.columns[w.name] = list.map(function (x) { var o = { n: x.n, on: x.on }; if (x.l) o.l = x.l; return o; }); setSum(); };
+
+    var renderBody = function (state) {
+      body.textContent = '';
+      var note = function (cls, txt) { var e = document.createElement('p'); e.className = cls; e.textContent = txt; body.appendChild(e); return e; };
+      if (state === 'loading') { note('cfg__note', t('cf_cols_loading')); return; }
+      if (w.columnsError && !dataSel.columns[w.name]) note('cfg__warn', t('cf_data_columns_none') + ' (' + w.columnsError + ')');
+      buildList();
+      if (!list.length) { body.appendChild(reloadBtn()); return; }
+      note('cfg__note', t('cf_data_columns_hint'));
+      var ul = document.createElement('div'); ul.className = 'cols__list'; body.appendChild(ul);
+      var draw = function () {
+        ul.textContent = '';
+        list.forEach(function (x, i) {
+          var r = document.createElement('div'); r.className = 'cols__row' + (x.on ? '' : ' is-off');
+          r.draggable = true;
+          r.addEventListener('dragstart', function (e) { dragFrom = i; r.classList.add('is-drag'); try { e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; } catch (er) { /* ignore */ } });
+          r.addEventListener('dragend', function () { r.classList.remove('is-drag'); });
+          r.addEventListener('dragover', function (e) { e.preventDefault(); r.classList.add('is-over'); });
+          r.addEventListener('dragleave', function () { r.classList.remove('is-over'); });
+          r.addEventListener('drop', function (e) {
+            e.preventDefault(); r.classList.remove('is-over');
+            if (dragFrom == null || dragFrom === i) return;
+            var item = list.splice(dragFrom, 1)[0]; list.splice(i, 0, item); dragFrom = null; save(); draw();
+          });
+          var grip = document.createElement('span'); grip.className = 'cols__grip'; grip.textContent = '⋮⋮'; r.appendChild(grip);
+          var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = x.on;
+          cb.addEventListener('change', function () { x.on = cb.checked; save(); draw(); });
+          var name = document.createElement('span'); name.className = 'cols__name'; name.textContent = x.n; name.title = x.n;
+          var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = x.n; inp.value = x.l; inp.maxLength = 80;
+          inp.addEventListener('input', function () { x.l = inp.value.trim(); save(); });
+          var mv = function (d, label, txt) {
+            var b = document.createElement('button'); b.type = 'button'; b.className = 'cols__btn'; b.textContent = txt; b.title = label;
+            b.disabled = (d < 0 && i === 0) || (d > 0 && i === list.length - 1);
+            b.addEventListener('click', function () { var tmp = list[i]; list[i] = list[i + d]; list[i + d] = tmp; save(); draw(); });
+            return b;
+          };
+          r.appendChild(cb); r.appendChild(name); r.appendChild(inp); r.appendChild(mv(-1, t('cf_up'), '↑')); r.appendChild(mv(1, t('cf_down'), '↓'));
+          ul.appendChild(r);
+        });
+      };
       draw();
+      var bar = document.createElement('div'); bar.className = 'cols__bar';
+      bar.appendChild(reloadBtn());
+      var reset = document.createElement('button'); reset.type = 'button'; reset.className = 'btn btn--ghost cols__reset'; reset.textContent = t('cf_data_reset');
+      reset.addEventListener('click', function () {
+        delete dataSel.columns[w.name]; setSum();
+        if (w.columns) renderBody(); else { renderBody('loading'); loadColumns(w).then(function () { renderBody(); }); }
+      });
+      bar.appendChild(reset);
+      body.appendChild(bar);
+    };
+
+    var reloadBtn = function () {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn--ghost cols__reset'; b.textContent = t('cf_cols_reload');
+      b.addEventListener('click', function () { w.columns = null; renderBody('loading'); loadColumns(w).then(function () { renderBody(); }); });
+      return b;
+    };
+
+    var opened = false;
+    box.addEventListener('toggle', function () {
+      if (!box.open || opened) return;
+      opened = true;
+      // Réglage manuel existant : affiché tout de suite, sans interroger Tableau
+      if (dataSel.columns[w.name] || w.columns) { renderBody(); return; }
+      renderBody('loading');
+      loadColumns(w).then(function () { renderBody(); });
     });
-    box.appendChild(reset);
     return box;
   }
+
 
   // Choix du contrôle qui pilote ce paramètre (prend sa place et son ordre dans le récap)
   function controlPicker (it) {
@@ -253,8 +310,9 @@
     c.dataDefaults = dataSel.defaults;
     c.dataValues = $('dataValues').value;
     c.dataColumns = Object.keys(dataSel.columns).length ? dataSel.columns : null;
-    var hasOv = Object.keys(ov.f).length || Object.keys(ov.p).length || Object.keys(ov.pc).length || Object.keys(ov.labels).length;
-    c.overrides = hasOv ? { f: ov.f, p: ov.p, pc: ov.pc, labels: ov.labels } : null;
+    var hasOv = Object.keys(ov.f).length || Object.keys(ov.p).length || Object.keys(ov.pc).length || Object.keys(ov.labels).length || Object.keys(ov.nc).length;
+    c.overrides = hasOv ? { f: ov.f, p: ov.p, pc: ov.pc, labels: ov.labels, nc: ov.nc } : null;
+    c.sortOrder = $('sortOrder').value;
     return c;
   }
 

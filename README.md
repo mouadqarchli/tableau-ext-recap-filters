@@ -1,10 +1,10 @@
-# Filters & parameters recap — Tableau dashboard extension (v2.5.0)
+# Filters & parameters recap — Tableau dashboard extension (v2.8.0)
 
 Shows a visual recap of **what the user has selected on the dashboard**, in English (default) or French, with a full **export**.
 
 * **Filters**: only those with a **filter card on the dashboard**, including cards in a collapsed filter panel (configurable). Technical filters, action filters and generated fields (*Measure Names*) are ignored.
 * **Parameters**: only those with a **parameter control**, shown with the control's caption.
-* **Same order as the dashboard** (row by row, left to right).
+* **Alphabetical order** of filters and parameters by default (Configure… > Order: Alphabetical / Dashboard order).
 * Filters equivalent to "All" are hidden: "(All)", every value ticked one by one, only Null unticked (the card then shows "(All)"), or a range slider at its bounds.
 * **"Except" display**: when few values are unticked (≤ 12 and fewer than the kept values), the recap shows "Except Australia, New Zealand" instead of "45 values of 47".
 * A filter whose status is not yet known is **not shown** (no appear-then-disappear); the summary says "analysing N filters…".
@@ -21,6 +21,22 @@ The **Export** button (download icon) opens a window with the full report — ev
 | Print / PDF | Opens the report in your web browser (default browser from Tableau Desktop) and launches printing with complete lists — choose "Save as PDF" |
 
 Tableau Desktop may block downloads from extension windows: use **Copy as text** there. On Tableau Server / Cloud in a browser, all four actions work.
+
+## Data export (sheets + recap)
+
+The **Export data** button (table icon) opens a panel listing the dashboard's visible sheets. Tick one or more, choose **Excel** or **CSV**, keep "Include the filters & parameters recap" ticked, then **Export**:
+
+* **Excel (.xlsx)**: a "Filters & parameters" tab (dashboard, date, sheets and row counts, every filter and parameter) followed by one tab per sheet. Header row frozen, automatic filters, numbers and dates typed.
+* **CSV**: one file per sheet, the recap at the top, then the data (`,` separator in English, `;` with decimal comma in French).
+* **Copy**: same content as tab-separated text, to paste into Excel — use it in Tableau Desktop, which may block downloads.
+
+The export contains the **summary data** of each sheet (what the sheet displays, with filters and parameters applied, selection ignored). *Measure Names / Measure Values* are pivoted back into one column per measure. Grand totals and subtotals are not part of the summary data. No "full data" permission is required.
+
+**Columns.** By default the export follows the sheet: dimensions in the order of the Rows/Columns shelves, then the measures (Tableau does not expose their display order: set it once in Columns), and fields placed only on Detail or Tooltip (helper calculations, titles…) are left out — this needs Tableau 2023.3+ (API 1.11). For full control, Configure… > Data export > **Columns** lets the designer tick, reorder and rename the columns of each sheet. The export panel also offers **Values: Raw** (typed numbers and dates) or **As displayed** (exactly the text shown in the view, e.g. "42%").
+
+In Configure… > **Data export** the designer chooses which sheets are exportable, which are ticked by default, and the maximum number of rows per sheet (200,000 by default).
+
+> Governance: check with your Tableau Cloud admin how the "Download Summary Data" capability applies to extensions, and test with a user who does not have it.
 
 ## Quick start with the tableau/extensions-api repo (`npm start`)
 
@@ -75,11 +91,30 @@ In authoring mode, the bug button (or Ctrl+Alt+D) lists every filter of every sh
 
 ## Performance
 
+What makes a dashboard slow is the number and cost of calls to Tableau, not the size of the source as such: number of sheets, fields with many values whose full list is read ("every value ticked?", "Except", "x of N"), live connections (each list = one SQL query) and heavy sheets. The diagnostics (bug button) now list the **slowest calls with their duration**.
+
+* First read: only the **visible sheets** are read; hidden technical sheets are read only if a filter card is left without its filter.
+* Per filter, Configure… > Recap content > **Skip value check** stops the value-list query for that field (it is then always shown, without "Except" / "x of N").
+* Configure… opens without reading any sheet data; a sheet's columns are read only when its **Columns** section is expanded (and not at all when a manual column setup exists).
+
 * No external dependency (no jQuery, web fonts or icon fonts).
 * Incremental updates: a filter change re-reads **that filter only**; changes to non-exposed filters trigger no Tableau call.
 * Layout events are ignored unless cards/controls actually changed; only sheets carrying the cards are re-read.
 * Domain queries run in the background (2 at a time, never ahead of a user action) and verdicts are cached for 12 h, as are totals, bounds and the last display (instant reopen).
 * Optimistic clearing, targeted DOM updates, loading bar only after 250 ms.
+
+## Test environment (branch `develop`)
+
+The workflow `.github/workflows/pages.yml` publishes both branches on the same GitHub Pages site:
+
+| Branch | URL | Manifest |
+|---|---|---|
+| `main` (prod) | `https://<owner>.github.io/<repo>/index.html` | `RecapFiltres.trex` |
+| `develop` (test) | `https://<owner>.github.io/<repo>/dev/index.html` | `RecapFiltres-DEV.trex` |
+
+The DEV version shows a purple **DEV** badge and keeps its own local cache. Its manifest has a different extension id, so prod and dev can never be confused in a workbook.
+
+Workflow: work on `develop` → test in a **copy** of the workbook with `RecapFiltres-DEV.trex` → open a pull request `develop` → `main` → merge = production update.
 
 ## Publishing an update
 

@@ -69,3 +69,6 @@ html, body.cfg { overflow: auto; background: #fff; }
 .cols__grip { margin-right: 6px; color: var(--text-3); cursor: grab; font-size: 11px; letter-spacing: -2px; user-select: none; }
 .cols__row.is-drag { opacity: .4; }
 .cols__row.is-over { box-shadow: inset 0 2px 0 var(--accent); }
+.ov-nc { margin-left: 10px; align-self: center; font-size: 11.5px; }
+.cols__bar { display: flex; flex-wrap: wrap; }
+.cols__bar .btn { margin-right: 6px; }
