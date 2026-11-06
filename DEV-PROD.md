@@ -15,7 +15,7 @@ tableau-ext-recap-filters/        (branch main, GitHub Pages "Deploy from a bran
 | PROD | https://<owner>.github.io/tableau-ext-recap-filters/index.html | RecapFiltres.trex |
 | DEV  | https://<owner>.github.io/tableau-ext-recap-filters/dev/index.html | RecapFiltres-DEV.trex |
 
-The DEV version shows a purple DEV badge and uses its own local cache.
+The DEV version shows a yellow (SMCP palette) DEV badge and uses its own local cache.
 The two manifests have different extension ids: a workbook knows which one it uses.
 
 ## Day to day

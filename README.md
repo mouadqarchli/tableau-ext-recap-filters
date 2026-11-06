@@ -16,7 +16,7 @@ The **Export** button (download icon) opens a window with the full report — ev
 | Action | Result |
 |---|---|
 | Copy as text | Readable list, ready to paste into Outlook, Teams or Excel |
-| Download CSV | One row per filter/parameter (Type, Name, Mode, Values, Count, Total); `,` separator in English, `;` in French |
+| Download CSV | One row per filter/parameter (Type, Name, Mode, Count, Total, Values); separator chosen in Configure… > Data export (automatic: `;` for French Excel, `,` otherwise); quotes only where needed |
 | Download text | Same content as "Copy as text", as a .txt file |
 | Print / PDF | Opens the report in your web browser (default browser from Tableau Desktop) and launches printing with complete lists — choose "Save as PDF" |
 
@@ -24,11 +24,11 @@ Tableau Desktop may block downloads from extension windows: use **Copy as text**
 
 ## Data export (sheets + recap)
 
-The **Export data** button (table icon) opens a panel listing the dashboard's visible sheets. Tick one or more, choose **Excel** or **CSV**, keep "Include the filters & parameters recap" ticked, then **Export**:
+The **Export data** button (table icon) opens a panel listing the dashboard's visible sheets. Tick one or more, choose **Excel** or **CSV**, keep "Add the filters & parameters recap below the data" ticked, then **Export**:
 
-* **Excel (.xlsx)**: a "Filters & parameters" tab (dashboard, date, sheets and row counts, every filter and parameter) followed by one tab per sheet. Header row frozen, automatic filters, numbers and dates typed.
-* **CSV**: one file per sheet, the recap at the top, then the data (`,` separator in English, `;` with decimal comma in French).
-* **Copy**: same content as tab-separated text, to paste into Excel — use it in Tableau Desktop, which may block downloads.
+* **Excel (.xlsx)**: one tab per sheet — the data first (header row frozen, automatic filter on the data only, numbers and dates typed), then two empty rows and the **recap below the data** (dashboard, date, row count, every filter and parameter). SMCP styling: Verdana, black header, bordeaux recap header.
+* **CSV**: one file per sheet, the data first then the recap below. Separator: Automatic (`;` with decimal comma when the extension or the computer is in French, `,` otherwise), or forced to `;`, `,` or Tab. Values are quoted **only** when they contain the separator or a double quote; line breaks, tabs and invisible characters inside values are removed so that one Tableau row stays one CSV row.
+* **Copy**: same layout (data, then recap) as tab-separated text, to paste into Excel — use it in Tableau Desktop, which may block downloads.
 
 The export contains the **summary data** of each sheet (what the sheet displays, with filters and parameters applied, selection ignored). *Measure Names / Measure Values* are pivoted back into one column per measure. Grand totals and subtotals are not part of the summary data. No "full data" permission is required.
 
@@ -60,14 +60,14 @@ The Tableau library is found automatically in the folder's `lib/`, or else in th
 |---|---|---|
 | Language | English | English / Français / Automatic (Tableau language) |
 | Title | Filters & parameters | Header text (follows the language when left empty) |
-| Accent colour | #ff6d00 | Preset palette + custom colour |
-| Theme | Light | Light / Dark / Transparent |
+| Accent colour | #A05546 (SMCP bordeaux) | SMCP 2026 palette only (bordeaux, black, olive, ochre, blue grey, yellow); an older colour outside the palette falls back to bordeaux |
+| Theme | Light | Light / Ecru (SMCP) / Dark / Transparent |
 | Density | Comfortable | Compact for small zones |
 | Layout | Automatic | Cards, banner, or banner automatically when the zone is ≤ 140 px high |
 | Visible values per filter | 4 | Beyond that: clickable "+N" chip |
 | Show parameters / clear buttons / export / share of values | On | |
 | Show filters set to "All" | Off | Shown greyed out |
-| Workbook font | On | Uses the sheets' font (Tableau 2021.4+) |
+| Workbook font | Off | Off = SMCP fonts (Verdana for titles and labels, Georgia for values). On = the sheets' font (Tableau 2021.4+) |
 | Cards in hidden containers | On | Includes a collapsed filter panel |
 | Parameter controls in hidden containers | On | Turn off if hidden containers hold technical parameters |
 | Hide "every value ticked" filters | On | Background query; turn off on very large sources |
@@ -75,13 +75,28 @@ The Tableau library is found automatically in the folder's `lib/`, or else in th
 
 ## Recap content (per dashboard)
 
-Configure… > **Recap content** lists every filter of every sheet and every parameter of the workbook, with what the automatic mode does with it. For each item you can:
+Configure… > **Recap content** lists every filter of every sheet and every parameter of the workbook. Each item has **one choice**:
 
-* **Display**: Auto / Always show / Never show;
-* **Control** (parameters): link the parameter to the control that drives it — useful when the control's name differs from the technical parameter name (e.g. `p__Catalog Season Code` driven by the "Catalog Season Code (Current Year)" control). The parameter then takes that control's place in the recap. "No control" prevents any automatic link;
-* **Label in the recap**: rename what the recap and the export display (e.g. the title shown above the control on the dashboard).
+| Choice | Effect |
+|---|---|
+| **Auto** | The extension decides: filter with a filter card on the dashboard (shown when it actually restricts the data), parameter with a control |
+| **Include** | Always in the recap, even when the filter keeps every value |
+| **Exclude** | Never in the recap |
 
-Set items to **Always show** or **Never show** to make the recap match the dashboard exactly (e.g. a parameter changed through a parameter action with no control, a technical parameter whose control sits in a hidden container). Choices are saved with this dashboard's extension.
+Under each item, a line in plain words tells what will happen in the recap, and the coloured edge shows it (olive = in the recap, grey = not in the recap, bordeaux = set manually).
+
+Filters are grouped by what the extension recognised:
+
+* **Recognised automatically**: a filter card exists on the dashboard;
+* **Not recognised**: filters applied to the sheets without a filter card (filters pane, actions, sets, hidden sheets…) — choose **Include** to show them;
+* **Technical fields** (folded): Measure Names, generated Latitude/Longitude… — can now be included too.
+
+Each row also shows the filter type and the sheets it applies to. A search box filters by filter, parameter or sheet name, and **Set everything back to Auto** clears every Include/Exclude. Secondary settings are folded under **Customise**:
+
+* **Label in the recap**: rename what the recap and the export display;
+* **Skip value check** (filters): see Performance.
+
+For parameters, **Control** links the parameter to the control that drives it — useful when the control's name differs from the technical parameter name (e.g. `p__Catalog Season Code` driven by the "Catalog Season Code (Current Year)" control). The parameter then takes that control's place in the recap. "No control" prevents any automatic link.
 
 Parameter controls are linked to their parameter by id when Tableau provides it, otherwise by exact name, then normalized name, then partial name **only when a single parameter matches** (an ambiguous control is reported in Diagnostics and in the Recap content tab instead of being linked to the wrong parameter).
 

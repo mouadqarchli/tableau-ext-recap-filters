@@ -78,15 +78,25 @@
     return lines.join('\r\n');
   }
 
+  // CSV propre : séparateur adapté à Excel (« ; » en français), guillemets seulement
+  // si nécessaire, retours à la ligne et caractères invisibles retirés.
+  function csvSepChar () {
+    var v = rep.csvSep;
+    if (v === ';' || v === ',' || v === '\t') return v;
+    return t.lang === 'fr' ? ';' : ',';
+  }
   function asCsv () {
-    var d = t.lang === 'fr' ? ';' : ','; // séparateur attendu par Excel selon la langue
-    var q = function (v) { v = v == null ? '' : String(v); return /[",;\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    var lines = [[t('ex_col_type'), t('ex_col_name'), t('ex_col_mode'), t('ex_col_values'), t('ex_col_count'), t('ex_col_total')].map(q).join(d)];
+    var d = csvSepChar();
+    var q = function (v) {
+      v = v == null ? '' : String(v).replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/\r\n|[\r\n\t\u2028\u2029]/g, ' ').replace(/[\u0000-\u001F\u007F]/g, '');
+      return v.indexOf(d) !== -1 || v.indexOf('"') !== -1 ? '"' + v.replace(/"/g, '""') + '"' : v;
+    };
+    var lines = [[t('ex_col_type'), t('ex_col_name'), t('ex_col_mode'), t('ex_col_count'), t('ex_col_total'), t('ex_col_values')].map(q).join(d)];
     rep.filters.forEach(function (f) {
-      lines.push([t('ex_type_filter'), f.name, modeLabel(f.mode), f.values.join(' | '), f.count == null ? '' : f.count, f.total || ''].map(q).join(d));
+      lines.push([t('ex_type_filter'), f.name, modeLabel(f.mode), f.count == null ? '' : f.count, f.total || '', f.values.join(', ') + (f.truncated ? ' ' + t('ex_truncated') : '')].map(q).join(d));
     });
     rep.params.forEach(function (p) {
-      lines.push([t('ex_type_param'), p.name, modeLabel('param'), p.values.join(' | '), '', ''].map(q).join(d));
+      lines.push([t('ex_type_param'), p.name, modeLabel('param'), '', '', p.values.join(', ')].map(q).join(d));
     });
     return '\ufeff' + lines.join('\r\n');
   }
@@ -192,7 +202,7 @@
     t = I.make(rep.lang || 'en');
     I.apply(document, t);
     document.title = t('ex_title');
-    if (rep.accent) document.documentElement.style.setProperty('--accent', rep.accent);
+    if (rep.accent) document.documentElement.style.setProperty('--accent', rep.accent); // charte SMCP (palette contrôlée côté extension)
     draw();
     $('btnCopy').addEventListener('click', function () { copy(asText()); });
     $('btnCsv').addEventListener('click', function () { download(asCsv(), 'csv', 'text/csv;charset=utf-8'); });

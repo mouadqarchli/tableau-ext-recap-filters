@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.8.0';
+  var VERSION = '2.9.0';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -25,8 +25,8 @@
     title: '',               // vide = titre par défaut, traduit
     language: 'en',          // en | fr | auto (langue de Tableau)
     showExport: true,
-    accent: '#ff6d00',
-    theme: 'light',          // light | dark | transparent
+    accent: '#A05546',       // bordeaux SMCP (palette limitée à la charte, cf. BRAND_ACCENTS)
+    theme: 'light',          // light | ecru | dark | transparent
     density: 'comfortable',  // comfortable | compact
     layout: 'auto',          // auto | grid | bar
     showParams: true,
@@ -34,7 +34,7 @@
     showInactive: false,     // afficher aussi les filtres exposés sur « Tout »
     showRatio: true,         // barre « x sur N valeurs » (1 requête domaine / champ, mise en cache)
     maxChips: 4,
-    useWorkbookFont: true,
+    useWorkbookFont: false,   // charte SMCP : Verdana / Georgia par défaut
     includeHiddenCards: true, // cartes dans un conteneur replié (panneau de filtres)
     includeHiddenParams: true, // contrôles de paramètre dans un conteneur replié
     sortOrder: 'alpha',       // alpha (ordre alphabétique) | dashboard (ordre du dashboard)
@@ -44,10 +44,13 @@
     dataMaxRows: 200000,      // plafond de lignes par feuille
     dataColumns: null,        // { feuille: [{ n: nom, l: libellé, on: bool }] } ordre/choix manuels des colonnes
     dataValues: 'raw',        // raw (nombres/dates typés) | display (texte tel qu'affiché)
+    csvSep: 'auto',           // auto (selon la langue du poste) | ';' | ',' | 'tab'
     overrides: null,          // { f: {cléFiltre: 'show'|'hide'}, p: {cléParam: 'show'|'hide'} } — par dashboard
     checkAllSelected: true,   // détecter « toutes les valeurs cochées une à une » (requête de fond)
     ignoreNullOnly: true      // « Tout sauf Null » = non restrictif (comme la carte « (Tout) »)
   };
+  // Charte SMCP 2026 : couleurs d'accent autorisées (primaires + secondaires)
+  var BRAND_ACCENTS = ['#a05546', '#28282d', '#8c9b69', '#aa8250', '#cdd7e1', '#faf073'];
   var t = window.RecapI18n.make('en'); // traductions (mises à jour par loadSettings)
   var EXCEPT_MAX = 12;        // au-delà, on affiche les valeurs retenues plutôt que les exclues
   var BAR_MAX_HEIGHT = 140;       // en dessous : mode bandeau automatique
@@ -153,7 +156,7 @@
 
   function cacheDom () {
     ['app', 'title', 'summary', 'btnRefresh', 'btnConfig', 'btnDiag', 'btnExport', 'btnData', 'btnClear', 'content', 'toast',
-      'dataPanel', 'dxSheets', 'dxRecap', 'dxStatus', 'dxGo', 'dxCopy',
+      'dataPanel', 'dxSheets', 'dxRecap', 'dxStatus', 'dxGo', 'dxCopy', 'dxSep', 'dxSepRow',
       'errorBanner', 'errorMessage', 'btnRetry', 'emptyState',
       'filtersSection', 'filtersGrid', 'filtersCount',
       'paramsSection', 'paramsGrid', 'paramsCount', 'updatedAt', 'diagPanel', 'diagBody'
@@ -171,6 +174,7 @@
     el.btnExport.addEventListener('click', openExport);
     el.btnData.addEventListener('click', toggleDataPanel);
     el.dxGo.addEventListener('click', function () { runDataExport('file'); });
+    Array.prototype.forEach.call(el.dataPanel.querySelectorAll('input[name=dxFmt]'), function (r) { r.addEventListener('change', syncSepRow); });
     el.dxCopy.addEventListener('click', function () { runDataExport('copy'); });
     document.addEventListener('keydown', function (e) {
       if (e.ctrlKey && e.altKey && (e.key === 'd' || e.key === 'D')) toggleDiag();
@@ -1231,6 +1235,7 @@
       exportedAt: now.toISOString(),
       exportedLabel: now.toLocaleString(t.lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' }),
       accent: cfg.accent,
+      csvSep: csvSep(cfg.csvSep),
       filters: filters,
       params: params
     };
@@ -1321,10 +1326,20 @@
     var desktop = false;
     try { desktop = T.extensions.environment.context === 'desktop'; } catch (e) { /* ignore */ }
     dxStatus(desktop ? t('dx_desktop_hint') : '', '');
+    if (el.dxSep) el.dxSep.value = [';', ',', 'tab'].indexOf(cfg.csvSep) !== -1 ? cfg.csvSep : 'auto';
+    syncSepRow();
     var vm = el.dataPanel.querySelector('input[name=dxVal][value=' + (cfg.dataValues === 'display' ? 'display' : 'raw') + ']');
     if (vm) vm.checked = true;
     el.dataPanel.hidden = false;
     el.content.scrollTop = 0;
+  }
+
+  function syncSepRow () {
+    if (!el.dxSepRow) return;
+    var f = el.dataPanel.querySelector('input[name=dxFmt]:checked');
+    el.dxSepRow.hidden = !f || f.value !== 'csv';
+    var autoOpt = el.dxSep && el.dxSep.querySelector('option[value=auto]');
+    if (autoOpt) autoOpt.textContent = t('dx_sep_auto', { s: csvSep('auto') === ';' ? ';' : ',' });
   }
 
   function dxStatus (msg, tone) { el.dxStatus.textContent = msg || ''; el.dxStatus.className = 'dpanel__status' + (tone ? ' is-' + tone : ''); }
@@ -1370,12 +1385,17 @@
       if (mode === 'copy') { copyText(tablesToTsv(report, tables, withRecap)); dxStatus(t('copied'), 'ok'); return; }
       dxStatus(t('dx_building'), '');
       if (fmt === 'csv') {
-        tables.forEach(function (tb) { saveBlob(new Blob([tableToCsv(report, tb, withRecap)], { type: 'text/csv;charset=utf-8' }), exportFileName(tables.length > 1 ? tb.name : '', 'csv')); });
+        var sepChar = csvSep(el.dxSep ? el.dxSep.value : cfg.csvSep);
+        tables.forEach(function (tb) { saveBlob(new Blob([tableToCsv(report, tb, withRecap, sepChar)], { type: 'text/csv;charset=utf-8' }), exportFileName(tables.length > 1 ? tb.name : '', 'csv')); });
         return finishMsg(tables);
       }
-      var sheets = [];
-      if (withRecap) sheets.push(recapSheet(report, tables));
-      tables.forEach(function (tb) { sheets.push({ name: tb.name, rows: [tb.header.map(function (x) { return { v: x, s: 1 }; })].concat(tb.rows), freezeRow: 1, autoFilterRow: 1 }); });
+      // Une feuille Excel par feuille Tableau : données en haut, récap EN DESSOUS des lignes
+      var sheets = tables.map(function (tb) {
+        var rows = [tb.header.map(function (x) { return { v: x, s: 1 }; })].concat(tb.rows);
+        var dataEnd = rows.length;
+        if (withRecap) rows = rows.concat([[], []], recapRowsXlsx(report, tb));
+        return { name: tb.name, rows: rows, freezeRow: 1, autoFilterRow: 1, autoFilterEnd: dataEnd, widthRows: dataEnd };
+      });
       return window.RecapXlsx.build(sheets).then(function (blob) { saveBlob(blob, exportFileName('', 'xlsx')); finishMsg(tables); });
     }).catch(function (err) {
       console.warn('[recap] data export', err);
@@ -1397,31 +1417,57 @@
   var readSheetData = RS.readSheetData; var toTable = RS.toTable; var vizSpec = RS.vizSpec;
   var shapeTable = RS.shapeTable; var sheetColumns = RS.sheetColumns;
 
+  // Récap : la colonne « Valeurs » (souvent longue) est placée en dernier
+  // pour qu'elle puisse déborder librement à droite dans Excel.
   function recapLines (report) {
     var out = [];
-    report.filters.forEach(function (f) { out.push([t('ex_type_filter'), f.name, modeText(f.mode), f.values.join(', '), f.count == null ? '' : f.count, f.total || '']); });
-    report.params.forEach(function (p) { out.push([t('ex_type_param'), p.name, modeText('param'), p.values.join(', '), '', '']); });
+    report.filters.forEach(function (f) { out.push([t('ex_type_filter'), f.name, modeText(f.mode), f.count == null ? '' : f.count, f.total || '', f.values.join(', ') + (f.truncated ? ' ' + t('ex_truncated') : '')]); });
+    report.params.forEach(function (p) { out.push([t('ex_type_param'), p.name, modeText('param'), '', '', p.values.join(', ')]); });
     return out;
   }
   function modeText (m) {
     return t({ include: 'ex_mode_include', exclude: 'ex_mode_exclude', except: 'ex_mode_except', range: 'ex_mode_range', date: 'ex_mode_date', param: 'ex_mode_param' }[m] || 'ex_mode_include');
   }
-  function recapHeader () { return [t('ex_col_type'), t('ex_col_name'), t('ex_col_mode'), t('ex_col_values'), t('ex_col_count'), t('ex_col_total')]; }
+  function recapHeader () { return [t('ex_col_type'), t('ex_col_name'), t('ex_col_mode'), t('ex_col_count'), t('ex_col_total'), t('ex_col_values')]; }
+  function recapTitle (report) { return report.title + (report.dashboard ? ' — ' + report.dashboard : ''); }
+  function sheetLine (tb) { return t('dx_sheet_line', { s: tb.name, n: tb.rows.length.toLocaleString(t.lang === 'fr' ? 'fr-FR' : 'en-GB') }) + (tb.truncated ? ' ' + t('ex_truncated') : ''); }
 
-  function recapSheet (report, tables) {
+  // Bloc récap placé sous les données (Excel). Styles : 4 titre, 6 note, 7 en-tête récap
+  function recapRowsXlsx (report, tb) {
     var rows = [
-      [{ v: report.title + (report.dashboard ? ' — ' + report.dashboard : ''), s: 4 }],
-      [{ v: t('ex_exported', { d: report.exportedLabel }), s: 6 }]
+      [{ v: t('dx_recap_sheet').toUpperCase(), s: 4 }],
+      [{ v: recapTitle(report), s: 6 }],
+      [{ v: t('ex_exported', { d: report.exportedLabel }) + ' — ' + sheetLine(tb), s: 6 }],
+      recapHeader().map(function (x) { return { v: x, s: 7 }; })
     ];
-    tables.forEach(function (tb) {
-      rows.push([{ v: t('dx_sheet_line', { s: tb.name, n: tb.rows.length.toLocaleString() }) + (tb.truncated ? ' ' + t('ex_truncated') : ''), s: 6 }]);
-    });
-    rows.push([]);
-    rows.push(recapHeader().map(function (x) { return { v: x, s: 1 }; }));
     var lines = recapLines(report);
     if (!lines.length) rows.push([t('ex_no_filter')]);
-    rows = rows.concat(lines);
-    return { name: t('dx_recap_sheet'), rows: rows, widths: [12, 34, 14, 80, 10, 10] };
+    return rows.concat(lines.map(function (l) { return l.map(function (v) { return v === '' ? null : v; }); }));
+  }
+
+  /* ---- Nettoyage des textes exportés (CSV / copier-coller) -------------
+   * - retours à la ligne et tabulations internes -> espace (une ligne Tableau = une ligne)
+   * - caractères invisibles (zéro-largeur, BOM, contrôles) supprimés
+   * - guillemets ajoutés UNIQUEMENT si la valeur contient le séparateur réellement
+   *   utilisé ou un guillemet (avant : toute valeur contenant « , » ou « ; »)
+   * --------------------------------------------------------------------- */
+  function cleanText (v) {
+    return String(v)
+      .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+      .replace(/\r\n|[\r\n\t\u2028\u2029]/g, ' ')
+      .replace(/[\u0000-\u001F\u007F]/g, '');
+  }
+
+  // Séparateur CSV : « ; » pour un Excel en français (virgule décimale), « , » sinon.
+  // Auto = langue de l'extension si FR, puis langue du poste.
+  function csvSep (pref) {
+    if (pref === ';' || pref === ',') return pref;
+    if (pref === 'tab') return '\t';
+    if (t.lang === 'fr') return ';';
+    var loc = '';
+    try { loc = navigator.language || ''; } catch (e) { /* ignore */ }
+    if (!loc) { try { loc = T.extensions.environment.locale || ''; } catch (e) { /* ignore */ } }
+    return /^(fr|de|es|it|pt|nl|da|sv|nb|nn|no|fi|pl|cs|sk|ru|uk|tr|el|hu|ro|bg|hr|sl|lt|lv|et|id|vi)\b/i.test(String(loc)) ? ';' : ',';
   }
 
   function csvValue (v, d) {
@@ -1430,47 +1476,56 @@
       var p = function (n) { return (n < 10 ? '0' : '') + n; };
       return v.getFullYear() + '-' + p(v.getMonth() + 1) + '-' + p(v.getDate()) + (v.getHours() || v.getMinutes() || v.getSeconds() ? ' ' + p(v.getHours()) + ':' + p(v.getMinutes()) + ':' + p(v.getSeconds()) : '');
     }
-    if (typeof v === 'number') return d === ';' ? String(v).replace('.', ',') : String(v); // Excel FR : virgule décimale
+    if (typeof v === 'number') return d === ';' || (d === '\t' && csvSep('auto') === ';') ? String(v).replace('.', ',') : String(v); // Excel FR : virgule décimale
     if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
-    v = String(v);
-    return /[",;\t\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    v = cleanText(v);
+    return v.indexOf(d) !== -1 || v.indexOf('"') !== -1 ? '"' + v.replace(/"/g, '""') + '"' : v;
   }
 
-  function tableToCsv (report, tb, withRecap) {
-    var d = t.lang === 'fr' ? ';' : ',';
+  function tableToCsv (report, tb, withRecap, d) {
+    d = d || csvSep(cfg.csvSep);
     var line = function (arr) { return arr.map(function (v) { return csvValue(v, d); }).join(d); };
-    var out = [];
-    if (withRecap) {
-      out.push(line([report.title + (report.dashboard ? ' — ' + report.dashboard : '')]));
-      out.push(line([t('ex_exported', { d: report.exportedLabel })]));
-      out.push(line([t('dx_sheet_line', { s: tb.name, n: tb.rows.length }) + (tb.truncated ? ' ' + t('ex_truncated') : '')]));
-      out.push(line(recapHeader()));
-      recapLines(report).forEach(function (l) { out.push(line(l)); });
-      out.push('');
-    }
-    out.push(line(tb.header));
+    var out = [line(tb.header)];
     tb.rows.forEach(function (r) { out.push(line(r)); });
+    if (withRecap) { // récap SOUS les données
+      out.push('', '');
+      out.push(line([t('dx_recap_sheet').toUpperCase()]));
+      out.push(line([recapTitle(report)]));
+      out.push(line([t('ex_exported', { d: report.exportedLabel }) + ' — ' + sheetLine(tb)]));
+      out.push(line(recapHeader()));
+      var lines = recapLines(report);
+      if (!lines.length) out.push(line([t('ex_no_filter')]));
+      lines.forEach(function (l) { out.push(line(l)); });
+    }
     return '\ufeff' + out.join('\r\n');
   }
 
+  // Copier-coller vers Excel (tabulations). Une valeur contenant un guillemet est
+  // protégée, sinon Excel fusionne les cellules au collage.
   function tablesToTsv (report, tables, withRecap) {
+    var dec = csvSep(cfg.csvSep) === ';' ? ';' : ',';
     var cell = function (v) {
-      if (v instanceof Date || typeof v === 'number' || typeof v === 'boolean') return csvValue(v, t.lang === 'fr' ? ';' : ',');
-      return v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' ');
+      if (v instanceof Date || typeof v === 'number' || typeof v === 'boolean') return csvValue(v, dec);
+      if (v == null) return '';
+      v = cleanText(v);
+      return v.indexOf('"') !== -1 ? '"' + v.replace(/"/g, '""') + '"' : v;
     };
     var out = [];
-    if (withRecap) {
-      out.push(report.title + (report.dashboard ? ' — ' + report.dashboard : ''), t('ex_exported', { d: report.exportedLabel }));
-      out.push(recapHeader().join('\t'));
-      recapLines(report).forEach(function (l) { out.push(l.map(cell).join('\t')); });
-      out.push('');
-    }
-    tables.forEach(function (tb) {
-      if (tables.length > 1) out.push(tb.name);
+    tables.forEach(function (tb, i) {
+      if (tables.length > 1) out.push(cell(tb.name));
       out.push(tb.header.map(cell).join('\t'));
       tb.rows.forEach(function (r) { out.push(r.map(cell).join('\t')); });
-      out.push('');
+      if (i < tables.length - 1) out.push('');
     });
+    if (withRecap) { // récap SOUS les données
+      out.push('', '');
+      out.push(cell(t('dx_recap_sheet').toUpperCase()));
+      out.push(cell(recapTitle(report)), cell(t('ex_exported', { d: report.exportedLabel })));
+      out.push(recapHeader().map(cell).join('\t'));
+      var lines = recapLines(report);
+      if (!lines.length) out.push(cell(t('ex_no_filter')));
+      lines.forEach(function (l) { out.push(l.map(cell).join('\t')); });
+    }
     return out.join('\r\n');
   }
 
@@ -1545,6 +1600,9 @@
     if (raw) { try { parsed = JSON.parse(raw) || {}; } catch (e) { console.warn('[recap] réglages illisibles'); } }
     var prev = cfg;
     cfg = assign({}, DEFAULTS, parsed);
+    // Charte SMCP : une couleur hors palette (ancien réglage) revient au bordeaux
+    if (BRAND_ACCENTS.indexOf(String(cfg.accent || '').toLowerCase()) === -1) cfg.accent = DEFAULTS.accent;
+    if (['light', 'ecru', 'dark', 'transparent'].indexOf(cfg.theme) === -1) cfg.theme = 'light';
     var envLang = '';
     try { envLang = T.extensions.environment.language; } catch (e) { /* ignore */ }
     var lang = window.RecapI18n.resolve(cfg.language, envLang);
@@ -1569,6 +1627,7 @@
     if (!cfg.showDataExport) el.dataPanel.hidden = true;
     root.style.setProperty('--accent', cfg.accent);
     root.style.setProperty('--accent-soft', hexToRgba(cfg.accent, 0.12));
+    root.style.setProperty('--accent-ink', inkFor(cfg.accent));
     root.className = 'theme-' + cfg.theme + ' density-' + cfg.density;
     applyLayout();
     applyWorkbookFont();
@@ -1601,7 +1660,7 @@
       if (fam) document.documentElement.style.setProperty('--font', '"' + fam.replace(/"/g, '') + '", ' + DEFAULTS_FONT);
     } catch (e) { /* API indisponible (< 2021.4) : police par défaut */ }
   }
-  var DEFAULTS_FONT = '"Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif';
+  var DEFAULTS_FONT = 'Verdana, Geneva, "DejaVu Sans", sans-serif';
 
   function openConfig () {
     var url = new URL('configure.html', window.location.href).href;
@@ -1624,13 +1683,23 @@
       Promise.all(sheets.map(function (ws) { return timed(t('tm_filters', { s: ws.name }), ws.getFiltersAsync()).catch(function () { return []; }); })),
       timed(t('tm_params'), dashboard.getParametersAsync())
     ]).then(function (res) {
+      // auto : 'card' (carte de filtre trouvée), 'nocard' (filtre appliqué sans carte : non reconnu),
+      // 'generated' (champ technique : Noms de mesures, Latitude générée…). Les champs techniques
+      // sont désormais listés pour pouvoir être forcés dans le récap.
       var seen = new Map();
-      res[0].forEach(function (fs) {
+      res[0].forEach(function (fs, i) {
+        var sheetName = sheets[i] ? sheets[i].name : '';
         fs.forEach(function (f) {
           var key = filterKey(f);
-          if (seen.has(key) || isGeneratedName(f.fieldName)) return;
+          var cur = seen.get(key);
+          if (cur) { if (sheetName && cur.sheets.indexOf(sheetName) === -1) cur.sheets.push(sheetName); return; }
           var card = exposure.matchFilter(f);
-          seen.set(key, { key: key, name: f.fieldName, auto: card ? 'card' : 'nocard', order: card ? card.order : 1000 + seen.size });
+          var gen = isGeneratedName(f.fieldName);
+          seen.set(key, {
+            key: key, name: f.fieldName, type: f.filterType || '', sheets: sheetName ? [sheetName] : [],
+            auto: gen ? 'generated' : card ? 'card' : 'nocard', hiddenCard: !!(card && card.hidden),
+            order: card ? card.order : 1000 + seen.size
+          });
         });
       });
       var filters = Array.from(seen.values()).sort(function (a, b) { return a.order - b.order || a.name.localeCompare(b.name); });
@@ -1740,9 +1809,18 @@
   function errText (e) { return (e && (e.message || e.toString())) || t('unknown_error'); }
   function hexToRgba (hex, a) {
     var m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
-    if (!m) return 'rgba(255,109,0,' + a + ')';
+    if (!m) return 'rgba(160,85,70,' + a + ')';
     var n = parseInt(m[1], 16);
     return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+  // Texte sur fond coloré : noir ou blanc selon la luminance (charte : textes noirs ou blancs)
+  function inkFor (hex) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return '#ffffff';
+    var n = parseInt(m[1], 16);
+    var lin = function (c) { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    var L = 0.2126 * lin(n >> 16 & 255) + 0.7152 * lin(n >> 8 & 255) + 0.0722 * lin(n & 255);
+    return L > 0.4 ? '#28282D' : '#ffffff';
   }
   function h (tag, cls, text) {
     var n = document.createElement(tag);

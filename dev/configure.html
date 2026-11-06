@@ -86,6 +86,7 @@
           <span class="field__label" data-i18n="cf_theme">Theme</span>
           <select id="theme">
             <option value="light" data-i18n="cf_theme_light">Light</option>
+            <option value="ecru" data-i18n="cf_theme_ecru">Ecru (SMCP)</option>
             <option value="dark" data-i18n="cf_theme_dark">Dark</option>
             <option value="transparent" data-i18n="cf_theme_transparent">Transparent</option>
           </select>
@@ -141,12 +142,21 @@
 
     <div class="cfg__body" data-panel="content" hidden>
       <p class="cfg__note" data-i18n="cf_content_intro"></p>
+      <ul class="ov-legend">
+        <li><b data-i18n="cf_ov_auto">Auto</b> <span data-i18n="cf_ov_auto_hint"></span></li>
+        <li><b data-i18n="cf_ov_show">Include</b> <span data-i18n="cf_ov_show_hint"></span></li>
+        <li><b data-i18n="cf_ov_hide">Exclude</b> <span data-i18n="cf_ov_hide_hint"></span></li>
+      </ul>
       <p id="unlinked" class="cfg__warn" hidden></p>
       <p id="invMissing" class="cfg__warn" data-i18n="cf_inventory_missing" hidden></p>
-      <h2 class="cfg__h2" data-i18n="sec_filters">Filters</h2>
-      <div id="ovFilters" class="ov-list"></div>
-      <h2 class="cfg__h2" data-i18n="sec_params">Parameters</h2>
-      <div id="ovParams" class="ov-list"></div>
+      <div id="ovTools" class="ov-tools">
+        <input id="ovSearch" type="search" data-i18n-ph="cf_search" placeholder="Search a filter, a parameter or a sheet…">
+        <button type="button" id="ovResetAll" class="btn btn--ghost" data-i18n="cf_reset_all">Set everything back to Auto</button>
+      </div>
+      <h2 class="cfg__h2"><span data-i18n="sec_filters">Filters</span> <span id="ovFiltersSum" class="ov-sum"></span></h2>
+      <div id="ovFilters"></div>
+      <h2 class="cfg__h2"><span data-i18n="sec_params">Parameters</span> <span id="ovParamsSum" class="ov-sum"></span></h2>
+      <div id="ovParams"></div>
     </div>
 
     <div class="cfg__body" data-panel="data" hidden>
@@ -161,7 +171,15 @@
             <option value="display" data-i18n="dx_values_display">As displayed</option>
           </select>
         </label>
-        <div></div>
+        <label class="field">
+          <span class="field__label" data-i18n="dx_sep">CSV separator</span>
+          <select id="csvSep">
+            <option value="auto" data-i18n="cf_sep_auto">Automatic</option>
+            <option value=";" data-i18n="dx_sep_semicolon">Semicolon ; (Excel FR)</option>
+            <option value="," data-i18n="dx_sep_comma">Comma , (Excel EN)</option>
+            <option value="tab" data-i18n="dx_sep_tab">Tab</option>
+          </select>
+        </label>
       </div>
       <label class="field" style="max-width:240px">
         <span class="field__label" data-i18n="cf_data_max">Maximum rows per sheet</span>

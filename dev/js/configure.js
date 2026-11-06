@@ -3,12 +3,16 @@
   'use strict';
   var KEY = 'recapConfig';
   var DEFAULTS = {
-    title: '', language: 'en', accent: '#ff6d00', theme: 'light', density: 'comfortable', layout: 'auto',
+    title: '', language: 'en', accent: '#A05546', theme: 'light', density: 'comfortable', layout: 'auto',
     showParams: true, showReset: true, showExport: true, showInactive: false, showRatio: true, maxChips: 4,
-    useWorkbookFont: true, includeHiddenCards: true, includeHiddenParams: true, checkAllSelected: true, ignoreNullOnly: true,
-    overrides: null, showDataExport: true, dataSheets: null, dataDefaults: null, dataMaxRows: 200000, dataColumns: null, dataValues: 'raw', sortOrder: 'alpha'
+    useWorkbookFont: false, includeHiddenCards: true, includeHiddenParams: true, checkAllSelected: true, ignoreNullOnly: true,
+    overrides: null, showDataExport: true, dataSheets: null, dataDefaults: null, dataMaxRows: 200000, dataColumns: null, dataValues: 'raw', sortOrder: 'alpha', csvSep: 'auto'
   };
-  var PALETTE = ['#ff6d00', '#111827', '#5b5fc7', '#0969da', '#0e9f6e', '#c2410c', '#be185d', '#7c3aed', '#b08d57'];
+  // Charte SMCP 2026 : couleurs primaires puis secondaires (pas de couleur libre)
+  var PALETTE = [
+    { c: '#A05546', n: 'Bordeaux' }, { c: '#28282D', n: 'Noir' }, { c: '#8C9B69', n: 'Olive' },
+    { c: '#AA8250', n: 'Ocre' }, { c: '#CDD7E1', n: 'Bleu gris' }, { c: '#FAF073', n: 'Jaune' }
+  ];
   var BOOLS = ['showDataExport', 'showParams', 'showReset', 'showExport', 'showInactive', 'showRatio', 'useWorkbookFont', 'includeHiddenCards', 'includeHiddenParams', 'checkAllSelected', 'ignoreNullOnly'];
   var inventory = null;
   var dataSel = { sheets: null, defaults: null, columns: {} };
@@ -25,7 +29,6 @@
     I.apply(document, t);
     document.title = t('configure');
     $('title').placeholder = t('title_default');
-    var custom = $('customColor'); if (custom) custom.title = t('cf_custom_color');
     renderContent();
   }
 
@@ -44,6 +47,8 @@
     dataSel = { sheets: Array.isArray(c.dataSheets) ? c.dataSheets.slice() : null, defaults: Array.isArray(c.dataDefaults) ? c.dataDefaults.slice() : null,
       columns: JSON.parse(JSON.stringify(c.dataColumns || {})) };
     $('dataValues').value = c.dataValues === 'display' ? 'display' : 'raw';
+    $('csvSep').value = [';', ',', 'tab'].indexOf(c.csvSep) !== -1 ? c.csvSep : 'auto';
+    $('theme').value = ['light', 'ecru', 'dark', 'transparent'].indexOf(c.theme) !== -1 ? c.theme : 'light';
     var o = c.overrides || {};
     ov = { f: assignObj({}, o.f), p: assignObj({}, o.p), pc: assignObj({}, o.pc), labels: assignObj({}, o.labels), nc: assignObj({}, o.nc) };
     translate(c.language);
@@ -51,58 +56,188 @@
 
   function assignObj (a, b) { for (var k in b || {}) a[k] = b[k]; return a; }
 
-  // ---- Onglet « Contenu du récap » ----
+  // ---- Onglet « Contenu du récap » ----------------------------------------
+  // Un seul choix par élément : Auto | Inclure | Exclure, avec en clair ce qui
+  // se passera dans le récap. Filtres regroupés par ce que l'extension a
+  // reconnu automatiquement ; recherche et remise à zéro globale.
+  var ovQuery = '';
+
   function renderContent () {
     $('invMissing').hidden = !!inventory;
+    $('ovTools').hidden = !inventory;
     if (!inventory) return;
-    drawList($('ovFilters'), inventory.filters, 'f', function (it) { return t(it.auto === 'card' ? 'cf_auto_card' : 'cf_auto_nocard'); });
-    drawList($('ovParams'), inventory.params, 'p', function (it) {
-      return it.auto === 'manual' ? t('cf_auto_manual', { c: it.control }) : it.auto === 'control' ? t('cf_auto_control', { c: it.control }) : t('cf_auto_nocontrol');
-    });
+    drawFilters();
+    drawParams();
     drawSheets();
     var un = inventory.unlinked || [];
     $('unlinked').hidden = !un.length;
     if (un.length) $('unlinked').textContent = t('cf_unlinked', { list: un.join(', ') });
+    applySearch();
   }
 
-  function drawList (wrap, items, kind, autoText) {
-    wrap.textContent = '';
-    items = items.slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name), t.lang, { numeric: true, sensitivity: 'base' }); });
-    if (!items.length) { var e = document.createElement('div'); e.className = 'ov-empty'; e.textContent = '—'; wrap.appendChild(e); return; }
-    items.forEach(function (it) {
-      var row = document.createElement('div');
-      var cur = ov[kind][it.key] || 'auto';
-      row.className = 'ov-row is-' + cur;
-      var txt = document.createElement('div'); txt.className = 'ov-row__text';
-      var n = document.createElement('div'); n.className = 'ov-row__name'; n.textContent = it.name; n.title = it.name;
-      var a = document.createElement('div'); a.className = 'ov-row__auto'; a.textContent = autoText(it); a.title = a.textContent;
-      txt.appendChild(n); txt.appendChild(a);
-      var sel = document.createElement('select');
-      [['auto', 'cf_ov_auto'], ['show', 'cf_ov_show'], ['hide', 'cf_ov_hide']].forEach(function (o) {
-        var opt = document.createElement('option'); opt.value = o[0]; opt.textContent = t(o[1]); sel.appendChild(opt);
-      });
-      sel.value = cur;
-      sel.addEventListener('change', function () {
-        if (sel.value === 'auto') delete ov[kind][it.key]; else ov[kind][it.key] = sel.value;
-        row.className = 'ov-row is-' + sel.value;
-      });
-      var top = document.createElement('div'); top.className = 'ov-row__top';
-      top.appendChild(txt); top.appendChild(sel);
-      row.appendChild(top);
+  function el (tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+  function byName (a, b) { return String(a.name).localeCompare(String(b.name), t.lang, { numeric: true, sensitivity: 'base' }); }
+  function typeLabel (ty) { return t({ categorical: 'cf_ft_list', range: 'cf_ft_range', 'relative-date': 'cf_ft_date', hierarchical: 'cf_ft_tree' }[ty] || 'cf_ft_other'); }
 
-      var extra = document.createElement('div'); extra.className = 'ov-row__extra';
-      if (kind === 'p') extra.appendChild(controlPicker(it));
-      extra.appendChild(labelInput(it, kind));
-      if (kind === 'f') {
-        var nc = document.createElement('label'); nc.className = 'check check--inline ov-nc'; nc.title = t('cf_nc_hint');
-        var ncb = document.createElement('input'); ncb.type = 'checkbox'; ncb.checked = !!ov.nc[it.key];
-        ncb.addEventListener('change', function () { if (ncb.checked) ov.nc[it.key] = true; else delete ov.nc[it.key]; });
-        var ns = document.createElement('span'); ns.textContent = t('cf_nc');
-        nc.appendChild(ncb); nc.appendChild(ns); extra.appendChild(nc);
-      }
-      row.appendChild(extra);
-      wrap.appendChild(row);
+  // Ce que l'élément devient dans le récap, selon le mode automatique et le choix
+  function filterStatus (it) {
+    var o = ov.f[it.key];
+    if (o === 'show') return { inRecap: true, text: t('cf_st_f_show') };
+    if (o === 'hide') return { inRecap: false, text: t('cf_st_hide') };
+    if (it.auto === 'card') return { inRecap: true, text: t('cf_st_f_card') + (it.hiddenCard ? t('cf_st_hidden_card') : '') };
+    if (it.auto === 'generated') return { inRecap: false, text: t('cf_st_f_generated') };
+    return { inRecap: false, text: t('cf_st_f_nocard') };
+  }
+  function paramStatus (it) {
+    var o = ov.p[it.key];
+    var pc = ov.pc[it.key];
+    var ctrl = pc && pc.id !== 'none' ? pc.name : pc && pc.id === 'none' ? '' : it.control;
+    if (o === 'show') return { inRecap: true, text: t('cf_st_p_show') };
+    if (o === 'hide') return { inRecap: false, text: t('cf_st_hide') };
+    if (pc && pc.id !== 'none') return { inRecap: true, text: t('cf_auto_manual', { c: ctrl }) };
+    if (ctrl) return { inRecap: true, text: t('cf_st_p_control', { c: ctrl }) };
+    return { inRecap: false, text: t('cf_st_p_nocontrol') };
+  }
+
+  function segmented (kind, it, onChange) {
+    var box = el('div', 'seg'); box.setAttribute('role', 'radiogroup'); box.setAttribute('aria-label', it.name);
+    var cur = ov[kind][it.key] || 'auto';
+    [['auto', 'cf_ov_auto', 'cf_ov_auto_hint'], ['show', 'cf_ov_show', 'cf_ov_show_hint'], ['hide', 'cf_ov_hide', 'cf_ov_hide_hint']].forEach(function (o) {
+      var b = el('button', 'seg__btn seg__btn--' + o[0], t(o[1]));
+      b.type = 'button'; b.title = t(o[2]);
+      b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', cur === o[0] ? 'true' : 'false');
+      b.addEventListener('click', function () {
+        if (o[0] === 'auto') delete ov[kind][it.key]; else ov[kind][it.key] = o[0];
+        Array.prototype.forEach.call(box.children, function (x) { x.setAttribute('aria-checked', x === b ? 'true' : 'false'); });
+        onChange();
+      });
+      box.appendChild(b);
     });
+    return box;
+  }
+
+  function itemRow (kind, it) {
+    var row = el('div', 'ov-row');
+    row.setAttribute('data-search', [it.name, ov.labels[it.key] || '', (it.sheets || []).join(' '), it.control || ''].join(' ').toLowerCase());
+    var top = el('div', 'ov-row__top');
+    var txt = el('div', 'ov-row__text');
+    var name = el('div', 'ov-row__name', it.name); name.title = it.name;
+    txt.appendChild(name);
+    if (kind === 'f') {
+      var meta = [typeLabel(it.type)];
+      if (it.sheets && it.sheets.length) meta.push(t(it.sheets.length > 1 ? 'cf_sheets' : 'cf_sheet', { s: it.sheets.join(', ') }));
+      var m = el('div', 'ov-row__meta', meta.join(' · ')); m.title = m.textContent;
+      txt.appendChild(m);
+    }
+    var status = el('div', 'ov-row__status');
+    txt.appendChild(status);
+    var refresh = function () {
+      var st = kind === 'f' ? filterStatus(it) : paramStatus(it);
+      var o = ov[kind][it.key];
+      row.className = 'ov-row ' + (st.inRecap ? 'is-in' : 'is-out') + (o ? ' is-forced' : '');
+      status.textContent = st.text;
+      updateSummary();
+    };
+    top.appendChild(txt);
+    top.appendChild(segmented(kind, it, refresh));
+    row.appendChild(top);
+
+    var extra = el('div', 'ov-row__extra');
+    if (kind === 'p') extra.appendChild(controlPicker(it, refresh));
+    extra.appendChild(customize(it, kind));
+    row.appendChild(extra);
+    refresh();
+    return row;
+  }
+
+  // Réglages secondaires repliés : libellé affiché, vérification des valeurs
+  function customize (it, kind) {
+    var d = el('details', 'ov-more');
+    var sum = el('summary');
+    var setSum = function () {
+      var bits = [];
+      if (ov.labels[it.key]) bits.push(t('cf_more_label', { l: ov.labels[it.key] }));
+      if (kind === 'f' && ov.nc[it.key]) bits.push(t('cf_nc'));
+      sum.textContent = t('cf_more') + (bits.length ? ' — ' + bits.join(' · ') : '');
+      d.classList.toggle('is-set', !!bits.length);
+    };
+    d.appendChild(sum);
+    var body = el('div', 'ov-more__body');
+    body.appendChild(labelInput(it, kind, setSum));
+    if (kind === 'f') {
+      var nc = el('label', 'check check--inline ov-nc'); nc.title = t('cf_nc_hint');
+      var ncb = el('input'); ncb.type = 'checkbox'; ncb.checked = !!ov.nc[it.key];
+      ncb.addEventListener('change', function () { if (ncb.checked) ov.nc[it.key] = true; else delete ov.nc[it.key]; setSum(); });
+      nc.appendChild(ncb); nc.appendChild(el('span', null, t('cf_nc')));
+      body.appendChild(nc);
+      body.appendChild(el('p', 'ov-more__hint', t('cf_nc_hint')));
+    }
+    d.appendChild(body);
+    setSum();
+    return d;
+  }
+
+  function group (wrap, titleKey, hintKey, items, kind, collapsed) {
+    if (!items.length) return;
+    var g = el('details', 'ov-group'); g.open = !collapsed;
+    var sum = el('summary', 'ov-group__head');
+    sum.appendChild(el('span', 'ov-group__title', t(titleKey)));
+    sum.appendChild(el('span', 'ov-group__count', String(items.length)));
+    g.appendChild(sum);
+    if (hintKey) g.appendChild(el('p', 'ov-group__hint', t(hintKey)));
+    var list = el('div', 'ov-list');
+    items.slice().sort(byName).forEach(function (it) { list.appendChild(itemRow(kind, it)); });
+    g.appendChild(list);
+    wrap.appendChild(g);
+  }
+
+  function drawFilters () {
+    var wrap = $('ovFilters'); wrap.textContent = '';
+    var f = inventory.filters || [];
+    if (!f.length) { wrap.appendChild(el('div', 'ov-empty', t('cf_none'))); return; }
+    var pick = function (a) { return f.filter(function (x) { return (x.auto || 'nocard') === a; }); };
+    var gen = pick('generated');
+    group(wrap, 'cf_g_card', 'cf_g_card_hint', pick('card'), 'f');
+    group(wrap, 'cf_g_nocard', 'cf_g_nocard_hint', pick('nocard'), 'f');
+    group(wrap, 'cf_g_generated', 'cf_g_generated_hint', gen, 'f', !gen.some(function (x) { return ov.f[x.key]; }));
+  }
+
+  function drawParams () {
+    var wrap = $('ovParams'); wrap.textContent = '';
+    var p = inventory.params || [];
+    if (!p.length) { wrap.appendChild(el('div', 'ov-empty', t('cf_none'))); return; }
+    var list = el('div', 'ov-list');
+    p.slice().sort(byName).forEach(function (it) { list.appendChild(itemRow('p', it)); });
+    wrap.appendChild(list);
+  }
+
+  function updateSummary () {
+    if (!inventory) return;
+    var sum = function (items, kind, fn) {
+      var inR = 0; var forced = 0;
+      items.forEach(function (it) { if (fn(it).inRecap) inR++; if (ov[kind][it.key]) forced++; });
+      return t('cf_summary', { n: inR, total: items.length }) + (forced ? ' · ' + t('cf_summary_forced', { n: forced }) : '');
+    };
+    $('ovFiltersSum').textContent = sum(inventory.filters || [], 'f', filterStatus);
+    $('ovParamsSum').textContent = sum(inventory.params || [], 'p', paramStatus);
+    $('ovResetAll').disabled = !Object.keys(ov.f).length && !Object.keys(ov.p).length;
+  }
+
+  function applySearch () {
+    var q = ovQuery.trim().toLowerCase();
+    Array.prototype.forEach.call(document.querySelectorAll('[data-panel=content] .ov-row'), function (r) {
+      r.hidden = !!q && r.getAttribute('data-search').indexOf(q) === -1;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-panel=content] .ov-group'), function (g) {
+      var any = g.querySelector('.ov-row:not([hidden])');
+      g.hidden = !any;
+      if (q && any) g.open = true;
+    });
+  }
+
+  function wireContentTools () {
+    $('ovSearch').addEventListener('input', function (e) { ovQuery = e.target.value || ''; applySearch(); });
+    $('ovResetAll').addEventListener('click', function () { ov.f = {}; ov.p = {}; renderContent(); });
   }
 
   // ---- Onglet « Export des données » ----
@@ -251,7 +386,7 @@
 
 
   // Choix du contrôle qui pilote ce paramètre (prend sa place et son ordre dans le récap)
-  function controlPicker (it) {
+  function controlPicker (it, onChange) {
     var box = document.createElement('label'); box.className = 'ov-field';
     var cap = document.createElement('span'); cap.textContent = t('cf_ctrl'); box.appendChild(cap);
     var sel = document.createElement('select');
@@ -263,16 +398,19 @@
     sel.value = cur ? String(cur.id) : '';
     if (cur && sel.value !== String(cur.id)) sel.value = ''; // contrôle disparu
     sel.addEventListener('change', function () {
-      if (!sel.value) { delete ov.pc[it.key]; return; }
-      if (sel.value === 'none') { ov.pc[it.key] = { id: 'none' }; return; }
-      var c = (inventory.controls || []).filter(function (x) { return String(x.id) === sel.value; })[0];
-      ov.pc[it.key] = { id: c.id, name: c.name };
+      if (!sel.value) delete ov.pc[it.key];
+      else if (sel.value === 'none') ov.pc[it.key] = { id: 'none' };
+      else {
+        var c = (inventory.controls || []).filter(function (x) { return String(x.id) === sel.value; })[0];
+        ov.pc[it.key] = { id: c.id, name: c.name };
+      }
+      if (onChange) onChange();
     });
     box.appendChild(sel);
     return box;
   }
 
-  function labelInput (it, kind) {
+  function labelInput (it, kind, onChange) {
     var box = document.createElement('label'); box.className = 'ov-field ov-field--grow';
     var cap = document.createElement('span'); cap.textContent = t('cf_label'); box.appendChild(cap);
     var inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 80;
@@ -281,6 +419,7 @@
     inp.addEventListener('input', function () {
       var v = inp.value.trim();
       if (v) ov.labels[it.key] = v; else delete ov.labels[it.key];
+      if (onChange) onChange();
     });
     box.appendChild(inp);
     return box;
@@ -309,6 +448,7 @@
     c.dataSheets = dataSel.sheets;
     c.dataDefaults = dataSel.defaults;
     c.dataValues = $('dataValues').value;
+    c.csvSep = $('csvSep').value;
     c.dataColumns = Object.keys(dataSel.columns).length ? dataSel.columns : null;
     var hasOv = Object.keys(ov.f).length || Object.keys(ov.p).length || Object.keys(ov.pc).length || Object.keys(ov.labels).length || Object.keys(ov.nc).length;
     c.overrides = hasOv ? { f: ov.f, p: ov.p, pc: ov.pc, labels: ov.labels, nc: ov.nc } : null;
@@ -316,32 +456,33 @@
     return c;
   }
 
+  function inPalette (hex) {
+    hex = String(hex || '').toLowerCase();
+    return PALETTE.some(function (p) { return p.c.toLowerCase() === hex; });
+  }
+
   function setAccent (hex) {
-    accent = /^#[0-9a-f]{6}$/i.test(hex) ? hex : DEFAULTS.accent;
+    accent = inPalette(hex) ? hex : DEFAULTS.accent; // ancienne couleur hors charte -> bordeaux SMCP
     document.documentElement.style.setProperty('--accent', accent);
     var btns = document.querySelectorAll('.swatch');
     for (var i = 0; i < btns.length; i++) btns[i].setAttribute('aria-pressed', btns[i].getAttribute('data-c') === accent.toLowerCase() ? 'true' : 'false');
-    var custom = $('customColor'); if (custom) custom.value = accent;
   }
 
   function buildSwatches () {
     var wrap = $('swatches');
-    PALETTE.forEach(function (c) {
+    PALETTE.forEach(function (p) {
       var b = document.createElement('button');
-      b.type = 'button'; b.className = 'swatch'; b.style.background = c;
-      b.setAttribute('data-c', c.toLowerCase()); b.setAttribute('aria-label', c);
-      b.addEventListener('click', function () { setAccent(c); });
+      b.type = 'button'; b.className = 'swatch'; b.style.background = p.c;
+      b.setAttribute('data-c', p.c.toLowerCase()); b.setAttribute('aria-label', p.n + ' ' + p.c); b.title = p.n + ' — ' + p.c;
+      b.addEventListener('click', function () { setAccent(p.c); });
       wrap.appendChild(b);
     });
-    var input = document.createElement('input');
-    input.type = 'color'; input.id = 'customColor'; input.className = 'swatch-custom';
-    input.addEventListener('input', function () { setAccent(input.value); });
-    wrap.appendChild(input);
   }
 
   function init () {
     buildSwatches();
     wireTabs();
+    wireContentTools();
     tableau.extensions.initializeDialogAsync().then(function (payload) {
       try { envLang = tableau.extensions.environment.language; } catch (e) { envLang = ''; }
       var current = {}; var pl = {};

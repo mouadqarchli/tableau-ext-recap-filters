@@ -70,30 +70,38 @@
   // ---- XML helpers ----------------------------------------------------------
   function esc (s) {
     return String(s)
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF\u200B-\u200D\uFEFF]/g, '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function colName (i) { var s = ''; i++; while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
   function excelDate (d) { return d.getTime() / 864e5 + 25569 - d.getTimezoneOffset() / 1440; }
 
-  // Styles : 0 défaut, 1 en-tête, 2 date, 3 date-heure, 4 titre, 5 libellé gras, 6 texte gris
+  // Styles (charte SMCP : Verdana pour l'en-tête et les titres, noir #28282D,
+  // bordeaux #A05546 pour l'en-tête du récap ; textes noirs ou blancs uniquement)
+  // 0 défaut, 1 en-tête, 2 date, 3 date-heure, 4 titre, 5 libellé, 6 note, 7 en-tête récap
   var STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
     '<numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy hh:mm"/></numFmts>' +
-    '<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>' +
-    '<font><b/><sz val="14"/><name val="Calibri"/></font><font><color rgb="FF6B7280"/><sz val="10"/><name val="Calibri"/></font></fonts>' +
-    '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
-    '<fill><patternFill patternType="solid"><fgColor rgb="FF1F2328"/><bgColor indexed="64"/></patternFill></fill></fills>' +
-    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<fonts count="4">' +
+    '<font><sz val="10"/><color rgb="FF28282D"/><name val="Verdana"/><family val="2"/></font>' +
+    '<font><sz val="10"/><color rgb="FFFFFFFF"/><name val="Verdana"/><family val="2"/></font>' +
+    '<font><sz val="12"/><color rgb="FF28282D"/><name val="Verdana"/><family val="2"/></font>' +
+    '<font><i/><sz val="10"/><color rgb="FF28282D"/><name val="Georgia"/><family val="1"/></font></fonts>' +
+    '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor rgb="FF28282D"/><bgColor indexed="64"/></patternFill></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFA05546"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+    '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>' +
+    '<border><left/><right/><top/><bottom style="thin"><color rgb="FFA05546"/></bottom><diagonal/></border></borders>' +
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-    '<cellXfs count="7">' +
+    '<cellXfs count="8">' +
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
-    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
     '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
     '<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
-    '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+    '<xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>' +
     '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="top"/></xf>' +
     '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+    '<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
     '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
 
   // cell : null | string | number | boolean | Date | { v, s } (s = style)
@@ -114,7 +122,9 @@
     return '<c r="' + ref + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + esc(str) + '</t></is></c>';
   }
 
-  // sheet : { name, rows: [[cell]], widths?: [n], freezeRow?: n (lignes figées), autoFilterRow?: n (1-based) }
+  // sheet : { name, rows: [[cell]], widths?: [n], freezeRow?: n (lignes figées), autoFilterRow?: n (1-based),
+  //          autoFilterEnd?: n (dernière ligne filtrée, 1-based ; défaut = dernière ligne),
+  //          widthRows?: n (lignes prises en compte pour la largeur auto des colonnes) }
   function sheetXml (sh) {
     var rows = sh.rows; var parts = [];
     var maxCols = 0;
@@ -124,7 +134,7 @@
       parts.push('<sheetViews><sheetView workbookViewId="0"><pane ySplit="' + sh.freezeRow + '" topLeftCell="A' + (sh.freezeRow + 1) +
         '" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>');
     }
-    var widths = sh.widths || autoWidths(rows, maxCols);
+    var widths = sh.widths || autoWidths(sh.widthRows ? rows.slice(0, sh.widthRows) : rows, maxCols);
     if (widths.length) {
       parts.push('<cols>');
       widths.forEach(function (w, i) { parts.push('<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>'); });
@@ -137,11 +147,22 @@
       parts.push('<row r="' + (i + 1) + '">' + cells + '</row>');
     }
     parts.push('</sheetData>');
-    if (sh.autoFilterRow && maxCols && rows.length >= sh.autoFilterRow) {
-      parts.push('<autoFilter ref="A' + sh.autoFilterRow + ':' + colName(maxCols - 1) + rows.length + '"/>');
+    var fr = filterRange(sh);
+    if (fr) {
+      parts.push('<autoFilter ref="A' + sh.autoFilterRow + ':' + colName(fr.cols - 1) + fr.end + '"/>');
     }
     parts.push('</worksheet>');
     return parts.join('');
+  }
+
+  // Plage du filtre automatique : uniquement le bloc de données (pas le récap placé dessous)
+  function filterRange (sh) {
+    if (!sh.autoFilterRow || !sh.rows.length) return null;
+    var end = Math.min(sh.rows.length, sh.autoFilterEnd || sh.rows.length);
+    if (end < sh.autoFilterRow) return null;
+    var cols = 0;
+    for (var r = sh.autoFilterRow - 1; r < end; r++) if (sh.rows[r].length > cols) cols = sh.rows[r].length;
+    return cols ? { end: end, cols: cols } : null;
   }
 
   function autoWidths (rows, maxCols) {
@@ -200,10 +221,9 @@
   function definedNames (sheets, names) {
     var out = [];
     sheets.forEach(function (s, i) {
-      if (!s.autoFilterRow || !s.rows.length) return;
-      var maxCols = 0; s.rows.forEach(function (r) { if (r.length > maxCols) maxCols = r.length; });
-      if (!maxCols || s.rows.length < s.autoFilterRow) return;
-      out.push('<definedName name="_xlnm._FilterDatabase" localSheetId="' + i + '" hidden="1">\'' + esc(names[i].replace(/'/g, "''")) + '\'!$A$' + s.autoFilterRow + ':$' + colName(maxCols - 1) + '$' + s.rows.length + '</definedName>');
+      var fr = filterRange(s);
+      if (!fr) return;
+      out.push('<definedName name="_xlnm._FilterDatabase" localSheetId="' + i + '" hidden="1">\'' + esc(names[i].replace(/'/g, "''")) + '\'!$A$' + s.autoFilterRow + ':$' + colName(fr.cols - 1) + '$' + fr.end + '</definedName>');
     });
     return out.length ? '<definedNames>' + out.join('') + '</definedNames>' : '';
   }

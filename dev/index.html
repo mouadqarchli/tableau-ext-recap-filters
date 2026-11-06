@@ -126,12 +126,21 @@
             <label class="radio"><input type="radio" name="dxFmt" value="xlsx" checked><span>Excel (.xlsx)</span></label>
             <label class="radio"><input type="radio" name="dxFmt" value="csv"><span>CSV</span></label>
           </div>
+          <div id="dxSepRow" class="dpanel__row" hidden>
+            <label class="dpanel__label" for="dxSep" data-i18n="dx_sep">Separator</label>
+            <select id="dxSep">
+              <option value="auto">Automatic</option>
+              <option value=";" data-i18n="dx_sep_semicolon">Semicolon ; (Excel FR)</option>
+              <option value="," data-i18n="dx_sep_comma">Comma , (Excel EN)</option>
+              <option value="tab" data-i18n="dx_sep_tab">Tab</option>
+            </select>
+          </div>
           <div class="dpanel__row">
             <span class="dpanel__label" data-i18n="dx_values">Values</span>
             <label class="radio"><input type="radio" name="dxVal" value="raw" checked><span data-i18n="dx_values_raw">Raw (numbers, dates)</span></label>
             <label class="radio"><input type="radio" name="dxVal" value="display"><span data-i18n="dx_values_display">As displayed</span></label>
           </div>
-          <label class="check"><input id="dxRecap" type="checkbox" checked><span data-i18n="dx_include_recap">Include the filters &amp; parameters recap</span></label>
+          <label class="check"><input id="dxRecap" type="checkbox" checked><span data-i18n="dx_include_recap">Add the filters &amp; parameters recap below the data</span></label>
           <p id="dxStatus" class="dpanel__status" aria-live="polite"></p>
           <div class="dpanel__actions">
             <button id="dxCopy" class="btn" type="button" data-i18n="dx_copy">Copy</button>
