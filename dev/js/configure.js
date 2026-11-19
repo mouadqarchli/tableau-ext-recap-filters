@@ -6,7 +6,7 @@
     title: '', language: 'en', accent: '#A05546', theme: 'light', density: 'comfortable', layout: 'auto',
     showParams: true, showReset: true, showExport: true, showInactive: false, showRatio: true, maxChips: 4,
     useWorkbookFont: false, includeHiddenCards: true, includeHiddenParams: true, checkAllSelected: true, ignoreNullOnly: true,
-    overrides: null, showDataExport: true, dataSheets: null, dataDefaults: null, dataMaxRows: 1000000, dataColumns: null, dataValues: 'raw', sortOrder: 'alpha', csvSep: 'auto', serverUrl: '', serverViews: ''
+    overrides: null, showDataExport: true, dataSheets: null, dataDefaults: null, dataMaxRows: 1000000, dataColumns: null, dataValues: 'raw', sortOrder: 'alpha', csvSep: 'auto'
   };
   // Charte SMCP 2026 : couleurs primaires puis secondaires (pas de couleur libre)
   var PALETTE = [
@@ -48,8 +48,6 @@
       columns: JSON.parse(JSON.stringify(c.dataColumns || {})) };
     $('dataValues').value = c.dataValues === 'display' ? 'display' : 'raw';
     $('csvSep').value = [';', ',', 'tab'].indexOf(c.csvSep) !== -1 ? c.csvSep : 'auto';
-    $('serverUrl').value = c.serverUrl || '';
-    $('serverViews').value = c.serverViews || '';
     $('theme').value = ['light', 'ecru', 'dark', 'transparent'].indexOf(c.theme) !== -1 ? c.theme : 'light';
     var o = c.overrides || {};
     ov = { f: assignObj({}, o.f), p: assignObj({}, o.p), pc: assignObj({}, o.pc), labels: assignObj({}, o.labels), nc: assignObj({}, o.nc) };
@@ -246,7 +244,6 @@
   function drawSheets () {
     var wrap = $('dataSheets'); wrap.textContent = '';
     var ws = (inventory.worksheets || []).filter(function (w) { return !w.hidden; });
-    if (window.RecapServer) $('serverViews').placeholder = ws.map(function (w) { return w.name + ' = ' + window.RecapServer.viewUrlName(w.name); }).join('\n');
     if (!ws.length) { var e = document.createElement('div'); e.className = 'ov-empty'; e.textContent = '—'; wrap.appendChild(e); return; }
     var all = ws.map(function (w) { return w.name; });
     var exp = dataSel.sheets || all;
@@ -452,8 +449,6 @@
     c.dataDefaults = dataSel.defaults;
     c.dataValues = $('dataValues').value;
     c.csvSep = $('csvSep').value;
-    c.serverUrl = $('serverUrl').value.trim();
-    c.serverViews = $('serverViews').value.trim();
     c.dataColumns = Object.keys(dataSel.columns).length ? dataSel.columns : null;
     var hasOv = Object.keys(ov.f).length || Object.keys(ov.p).length || Object.keys(ov.pc).length || Object.keys(ov.labels).length || Object.keys(ov.nc).length;
     c.overrides = hasOv ? { f: ov.f, p: ov.p, pc: ov.pc, labels: ov.labels, nc: ov.nc } : null;

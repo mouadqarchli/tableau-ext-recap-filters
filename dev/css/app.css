@@ -388,6 +388,16 @@ html, body {
 .dpanel__row .dpanel__label { margin: 0 10px 0 0; }
 .dpanel .check, .dpanel .radio { display: inline-flex; align-items: center; padding: 3px 0; margin-right: 14px; font-size: 12.5px; cursor: pointer; }
 .dpanel .check input, .dpanel .radio input { margin: 0 7px 0 0; accent-color: var(--accent); }
+.dpanel__cols { margin-bottom: 8px; }
+.dcols { margin: 0 0 4px; border: 1px solid var(--border, #e3e3e3); border-radius: var(--radius-sm); background: var(--surface, #fff); }
+.dcols__sum { cursor: pointer; padding: 5px 8px; font-size: 12px; color: var(--text); }
+.dcols__body { padding: 2px 8px 8px; }
+.dcols__bar { display: flex; gap: 12px; margin-bottom: 4px; }
+.dcols__list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); max-height: 220px; overflow: auto; }
+.dcols__note { margin: 4px 0; font-size: 11.5px; color: var(--text-2); }
+.dcols__note.is-err { color: var(--danger); }
+.dpanel__hint { margin: 4px 0 2px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: 11.5px; line-height: 1.45; color: var(--text); box-shadow: inset 3px 0 0 var(--warn); }
+.dpanel__hint:empty { display: none; }
 .dpanel__status { min-height: 16px; margin: 8px 0; font-size: 12px; color: var(--text-2); }
 .dpanel__status.is-ok, .dpanel__status.is-warn, .dpanel__status.is-err { padding-left: 8px; color: var(--text); }
 .dpanel__status.is-ok { box-shadow: inset 3px 0 0 var(--success); }
@@ -447,6 +457,4 @@ html, body {
 .dpanel__head strong, .diag__head strong { font-family: var(--font-head); font-weight: 400; letter-spacing: .08em; text-transform: uppercase; font-size: 11px; }
 .toast { font-family: var(--font-text); font-weight: 400; }
 .dpanel select { height: 26px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; }
-.dpanel__row[hidden], .dpanel .radio[hidden], .dpanel__hint[hidden] { display: none !important; }
-.dpanel__hint { margin: 4px 0 2px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-2); font-family: var(--font-text); font-size: 11.5px; line-height: 1.45; color: var(--text); box-shadow: inset 3px 0 0 var(--smcp-olive); }
-.dpanel__status ul { margin: 4px 0 0; padding-left: 18px; }
+.dpanel__row[hidden] { display: none !important; }

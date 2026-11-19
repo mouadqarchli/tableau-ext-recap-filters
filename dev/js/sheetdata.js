@@ -189,26 +189,35 @@
     return cols.sort(function (x, y) { return x.rank - y.rank; });
   }
 
+  // Liste des colonnes dans l'ordre d'export, avec libellé et état coché par défaut
+  // (réglage du concepteur dans Configure, sinon automatique). Sert à l'export ET au
+  // sélecteur de colonnes de l'utilisateur final.
   // rename (facultatif) : libellé automatique d'une colonne non renommée à la main
   // (ex. « Customer Dimension 1 » -> valeur actuelle du paramètre : « Customer Name »).
-  function shapeTable (tb, spec, manual, rename) {
-    var auto = autoColumns(tb, spec);
+  function columnPlan (auto, manual, rename) {
     var lab = function (n) { var r = rename ? rename(n) : null; return r || n; };
-    var plan;
+    var plan = [];
     if (Array.isArray(manual) && manual.length) {
       var byName = {}; auto.forEach(function (c) { byName[c.n] = c; });
       var used = {};
-      plan = [];
       manual.forEach(function (m) {
         var c = byName[m.n];
         if (!c || used[m.n]) return;
         used[m.n] = true;
-        if (m.on !== false) plan.push({ i: c.i, label: m.l || lab(c.n) });
+        plan.push({ n: c.n, i: c.i, label: m.l || lab(c.n), on: m.on !== false });
       });
-      auto.forEach(function (c) { if (!used[c.n] && c.on) plan.push({ i: c.i, label: lab(c.n) }); }); // nouvelles colonnes
+      auto.forEach(function (c) { if (!used[c.n]) plan.push({ n: c.n, i: c.i, label: lab(c.n), on: c.on }); }); // nouvelles colonnes
     } else {
-      plan = auto.filter(function (c) { return c.on; }).map(function (c) { return { i: c.i, label: lab(c.n) }; });
+      plan = auto.map(function (c) { return { n: c.n, i: c.i, label: lab(c.n), on: c.on }; });
     }
+    return plan;
+  }
+
+  // pick (facultatif) : choix de l'utilisateur final { nomColonne: true|false }, prioritaire sur le défaut
+  function shapeTable (tb, spec, manual, rename, pick) {
+    var plan = columnPlan(autoColumns(tb, spec), manual, rename).filter(function (p) {
+      return pick && Object.prototype.hasOwnProperty.call(pick, p.n) ? !!pick[p.n] : p.on;
+    });
     // Deux colonnes portant le même libellé (ex. 2 paramètres sur la même valeur) : suffixe (2), (3)…
     var seen = {};
     plan.forEach(function (p) {
@@ -243,6 +252,6 @@
 
   root.RecapSheet = {
     readSheetData: readSheetData, toTable: toTable, vizSpec: vizSpec, autoColumns: autoColumns,
-    readSheetTable: readSheetTable, tableBuilder: tableBuilder, shapeTable: shapeTable, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
+    readSheetTable: readSheetTable, tableBuilder: tableBuilder, shapeTable: shapeTable, columnPlan: columnPlan, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
   };
 })(typeof window !== 'undefined' ? window : globalThis);

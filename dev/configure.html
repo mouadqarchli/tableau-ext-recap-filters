@@ -11,7 +11,7 @@
   <script>
     (function () {
       var CSS = ['css/app.css', 'css/configure.css'];
-      var JS = ['js/i18n.js', 'js/sheetdata.js', 'js/serverexport.js', 'js/configure.js'];
+      var JS = ['js/i18n.js', 'js/sheetdata.js', 'js/configure.js'];
       var LIBS = ['lib/tableau.extensions.1.latest.min.js', '../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.min.js', '../../../lib/tableau.extensions.1.latest.js'];
       var shown = false;
       function show () { if (!shown && document.body) { shown = true; document.body.style.visibility = 'visible'; } }
@@ -184,17 +184,6 @@
         <span class="field__label" data-i18n="cf_data_max">Maximum rows per sheet</span>
         <input id="dataMaxRows" type="number" min="1000" max="1000000" step="1000">
       </label>
-      <h2 class="cfg__h2" data-i18n="cf_srv_title">Server export</h2>
-      <label class="field">
-        <span class="field__label" data-i18n="cf_srv_url">Address of this dashboard</span>
-        <input id="serverUrl" type="url" placeholder="https://…/#/site/…/views/…/…" spellcheck="false">
-      </label>
-      <p class="cfg__note" data-i18n="cf_srv_url_hint"></p>
-      <label class="field">
-        <span class="field__label" data-i18n="cf_srv_views">Sheet names in the address</span>
-        <textarea id="serverViews" rows="3" spellcheck="false"></textarea>
-      </label>
-      <p class="cfg__note" data-i18n="cf_srv_views_hint"></p>
     </div>
 
     <footer class="cfg__foot">
