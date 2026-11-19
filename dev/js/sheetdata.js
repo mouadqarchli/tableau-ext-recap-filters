@@ -120,10 +120,12 @@
         }
       },
       result: function (truncated) {
-        if (!cols) return { header: [], measures: [], rows: [], truncated: !!truncated };
-        if (!groups) return { header: cols.map(function (c) { return c.fieldName; }), measures: [], rows: outRows, truncated: !!truncated };
+        if (!cols) return { header: [], types: [], measures: [], rows: [], truncated: !!truncated };
+        var ty = function (c) { return c.dataType; };
+        if (!groups) return { header: cols.map(function (c) { return c.fieldName; }), types: cols.map(ty), measures: [], rows: outRows, truncated: !!truncated };
         return {
           header: dims.map(function (c) { return c.fieldName; }).concat(measures),
+          types: dims.map(ty).concat(measures.map(function () { return mvCol.dataType; })),
           measures: measures.slice(),
           rows: order.map(function (k) { var g = groups.get(k); return g.dims.concat(measures.map(function (m) { return g.vals[m] == null ? null : g.vals[m]; })); }),
           truncated: !!truncated
@@ -170,21 +172,29 @@
   // Ordre et choix des colonnes : réglage manuel (Configure > Data export)
   // sinon automatique (lignes, colonnes, autres encodages, puis mesures ;
   // champs uniquement en Détail/Info-bulle exclus).
+  // g = groupe affiché dans le sélecteur : 'view' (dans la vue), 'measure', 'hidden' (Détail / Info-bulle)
+  var AGG_RE = /^(SUM|AVG|MIN|MAX|CNTD?|COUNTD?|MEDIAN|AGG|STDEVP?|VARP?|PCT\d+|KURTOSIS|SKEWNESS)\(/i;
+  var NUM_TYPES = { int: 1, float: 1 };
   function autoColumns (tb, spec) {
-    var cols = tb.header.map(function (n, i) { return { n: n, i: i, on: true, rank: 500 + i }; });
+    var isMeasure = {}; (tb.measures || []).forEach(function (m) { isMeasure[m] = true; });
+    var types = tb.types || [];
+    var cols = tb.header.map(function (n, i) {
+      var m = isMeasure[n] || AGG_RE.test(String(n));
+      return { n: n, i: i, on: true, rank: 500 + i, t: types[i] || '', g: m ? 'measure' : 'view' };
+    });
     if (!spec) return cols;
     var pos = function (list, n) {
       var k = fieldKey(n);
       for (var i = 0; i < list.length; i++) if (fieldKey(list[i]) === k) return i;
       return -1;
     };
-    var isMeasure = {}; tb.measures.forEach(function (m) { isMeasure[m] = true; });
     cols.forEach(function (c) {
-      if (isMeasure[c.n]) { c.rank = 1000 + c.i; return; } // ordre des mesures : non fourni par l'API -> réglage manuel
+      if (c.g === 'measure') { c.rank = 1000 + c.i; return; } // ordre des mesures : non fourni par l'API -> réglage manuel
       var a = pos(spec.shelf, c.n); var b = pos(spec.other, c.n); var z = pos(spec.hiddenOnly, c.n);
       if (a !== -1) c.rank = a;
       else if (b !== -1) c.rank = 100 + b;
-      else if (z !== -1) { c.on = false; c.rank = 3000 + c.i; }
+      else if (z !== -1) { c.on = false; c.rank = 3000 + c.i; c.g = 'hidden'; }
+      else if (NUM_TYPES[c.t]) { c.g = 'measure'; c.rank = 1000 + c.i; }
     });
     return cols.sort(function (x, y) { return x.rank - y.rank; });
   }
@@ -204,11 +214,11 @@
         var c = byName[m.n];
         if (!c || used[m.n]) return;
         used[m.n] = true;
-        plan.push({ n: c.n, i: c.i, label: m.l || lab(c.n), on: m.on !== false });
+        plan.push({ n: c.n, i: c.i, label: m.l || lab(c.n), on: m.on !== false, t: c.t, g: c.g });
       });
-      auto.forEach(function (c) { if (!used[c.n]) plan.push({ n: c.n, i: c.i, label: lab(c.n), on: c.on }); }); // nouvelles colonnes
+      auto.forEach(function (c) { if (!used[c.n]) plan.push({ n: c.n, i: c.i, label: lab(c.n), on: c.on, t: c.t, g: c.g }); }); // nouvelles colonnes
     } else {
-      plan = auto.map(function (c) { return { n: c.n, i: c.i, label: lab(c.n), on: c.on }; });
+      plan = auto.map(function (c) { return { n: c.n, i: c.i, label: lab(c.n), on: c.on, t: c.t, g: c.g }; });
     }
     return plan;
   }
@@ -238,7 +248,7 @@
     return readSheetData(ws, 2000, function () {}, 2000, null).then(function (d) {
       return vizSpec(ws).then(function (spec) {
         var tb = toTable(d, 'raw');
-        return autoColumns(tb, spec).map(function (c) { return { n: c.n, on: c.on }; });
+        return autoColumns(tb, spec).map(function (c) { return { n: c.n, on: c.on, t: c.t, g: c.g }; });
       });
     });
   }
@@ -252,6 +262,6 @@
 
   root.RecapSheet = {
     readSheetData: readSheetData, toTable: toTable, vizSpec: vizSpec, autoColumns: autoColumns,
-    readSheetTable: readSheetTable, tableBuilder: tableBuilder, shapeTable: shapeTable, columnPlan: columnPlan, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
+    readSheetTable: readSheetTable, norm: norm, tableBuilder: tableBuilder, shapeTable: shapeTable, columnPlan: columnPlan, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
   };
 })(typeof window !== 'undefined' ? window : globalThis);
