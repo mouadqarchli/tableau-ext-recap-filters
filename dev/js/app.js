@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.10.0';
+  var VERSION = '2.11.0';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -41,7 +41,7 @@
     showDataExport: true,     // bouton « Export data » (données des feuilles + récap)
     dataSheets: null,         // feuilles exportables (null = toutes les feuilles visibles)
     dataDefaults: null,       // feuilles cochées par défaut
-    dataMaxRows: 200000,      // plafond de lignes par feuille
+    dataMaxRows: 1000000,     // plafond de lignes par feuille (Excel : 1 048 576 lignes max)
     dataColumns: null,        // { feuille: [{ n: nom, l: libellé, on: bool }] } ordre/choix manuels des colonnes
     dataValues: 'raw',        // raw (nombres/dates typés) | display (texte tel qu'affiché)
     csvSep: 'auto',           // auto (selon la langue du poste) | ';' | ',' | 'tab'
@@ -59,6 +59,7 @@
   var EVENT_DEBOUNCE_MS = 40;
   var LAYOUT_DEBOUNCE_MS = 150;
   var MAX_EXPANDED_CHIPS = 150;
+  var XLSX_MAX_ROWS = 1048000;   // limite Excel : 1 048 576 lignes par onglet (en-tête + récap compris)
   var COPY_MAX_ROWS = 100000;     // au-delà, le presse-papiers échoue sans prévenir : export fichier conseillé
   var NO_VALUE_RE = /^\s*(|-|\u2013|\u2014|null|\(null\))\s*$/i; // paramètre « vide » (« - », « — »…)
 
@@ -175,7 +176,10 @@
     el.btnDiag.addEventListener('click', toggleDiag);
     el.btnExport.addEventListener('click', openExport);
     el.btnData.addEventListener('click', toggleDataPanel);
-    el.dxGo.addEventListener('click', function () { runDataExport('file'); });
+    el.dxGo.addEventListener('click', function () {
+      if (dx.busy) { dx.cancel = true; el.dxGo.disabled = true; return; } // bouton « Arrêter » pendant la lecture
+      runDataExport('file');
+    });
     Array.prototype.forEach.call(el.dataPanel.querySelectorAll('input[name=dxFmt]'), function (r) { r.addEventListener('change', syncSepRow); });
     el.dxCopy.addEventListener('click', function () {
       if (dx.pendingCopy != null) { copyPending(); return; } // 2e clic : copie dans le geste utilisateur
@@ -554,14 +558,12 @@
 
     if (exclude) {
       item.active = true;
-      if (count === undefined && cfg.showRatio && !overrides().nc[key]) item.needs = 'ratio';
       return finalize(item);
     }
 
     if (!cfg.checkAllSelected || overrides().nc[key]) {
       item.active = true;
       if (overrides().nc[key]) { item.total = count != null ? count : undefined; return finalize(item); } // aucune requête de valeurs
-      if (count === undefined && cfg.showRatio) item.needs = 'ratio';
       return finalize(item);
     }
 
@@ -574,8 +576,7 @@
     if (!v) {
       if (values.length === 1) {
         item.active = true; // une seule valeur retenue : forcément restrictif, affiché tout de suite
-        if (count === undefined && cfg.showRatio && !overrides().nc[key]) item.needs = 'ratio';
-        return finalize(item);
+          return finalize(item);
       }
       item.active = true; item.pending = true; item.needs = 'verdict';
       return finalize(item);
@@ -1082,21 +1083,8 @@
     chips.appendChild(frag);
     body.appendChild(chips);
 
-    var label;
-    if (it.except) {
-      label = t('meta_except', { n: it.except.length }) + (it.total ? t('meta_except_detail', { sel: it.values.length, total: it.total }) : '');
-    } else {
-      label = t.plural(it.exclude ? 'excluded' : 'values', values.length);
-      if (it.total) label += t('of_total', { total: it.total });
-    }
-    var metaRow = h('div', 'tile__meta');
-    metaRow.appendChild(h('span', null, label));
-    if (cfg.showRatio && it.total) {
-      var share = it.exclude ? (it.total - values.length) / it.total : (it.values || values).length / it.total;
-      metaRow.appendChild(bar(0, clamp(share)));
-      metaRow.title = t('kept_pct', { p: Math.round(clamp(share) * 100) });
-    }
-    tile.appendChild(metaRow);
+    // Plus de ligne « 1 valeur sur 4 / Toutes sauf 1 (4 sur 5) » ni de barre : l'étiquette SAUF / EXCLU
+    // et les couleurs suffisent (retour utilisateurs v2.11)
   }
 
   function renderRange (tile, body, it) {
@@ -1425,11 +1413,15 @@
     var withRecap = el.dxRecap.checked;
     var valMode = el.dataPanel.querySelector('input[name=dxVal]:checked');
     valMode = valMode ? valMode.value : (cfg.dataValues || 'raw');
-    var maxRows = Math.max(1000, cfg.dataMaxRows | 0 || 200000);
+    var maxRows = Math.max(1000, cfg.dataMaxRows | 0 || DEFAULTS.dataMaxRows);
+    if (fmt === 'xlsx' || mode === 'copy') maxRows = Math.min(maxRows, XLSX_MAX_ROWS);
     if (mode === 'copy') maxRows = Math.min(maxRows, COPY_MAX_ROWS); // au-delà : export fichier
     setPendingCopy(null);
     var rename = null;
-    dx.busy = true; el.dxGo.disabled = el.dxCopy.disabled = true; setBusy(true);
+    dx.busy = true; dx.cancel = false; dx.maxRows = maxRows;
+    el.dxCopy.disabled = true;
+    if (mode === 'file') el.dxGo.textContent = t('dx_stop'); else el.dxGo.disabled = true;
+    setBusy(true);
 
     var tables = [];
     var chain = paramRenamer().then(function (rn) { rename = rn; });
@@ -1438,13 +1430,15 @@
         var ws = findSheet(name);
         if (!ws) throw new Error(t('dx_sheet_missing', { s: name }));
         dxStatus(t('dx_reading', { s: name, n: 0 }), '');
-        return timed(t('tm_export', { s: name }), readSheetData(ws, maxRows, function (n, total) {
+        var t0 = Date.now();
+        return timed(t('tm_export', { s: name }), readSheetTable(ws, maxRows, function (n, total) {
+          if (dx.cancel) { var c = new Error('cancelled'); c.cancelled = true; throw c; }
           // Copie : inutile de lire 100 000 lignes pour finalement refuser -> arrêt dès la 1re page
           if (mode === 'copy' && total > maxRows) { var e = new Error('too_many'); e.tooMany = name; throw e; }
-          dxStatus(t('dx_reading', { s: name, n: n.toLocaleString() + (total ? ' / ' + total.toLocaleString() : '') }), '');
-        })).then(function (d) {
+          dxStatus(readingText(name, n, total, maxRows, t0), '');
+        }, valMode)).then(function (raw) {
           return vizSpec(ws).then(function (spec) {
-            var tb = shapeTable(toTable(d, valMode), spec, (cfg.dataColumns || {})[name], rename);
+            var tb = shapeTable(raw, spec, (cfg.dataColumns || {})[name], rename);
             tb.name = name; tables.push(tb);
           });
         });
@@ -1469,7 +1463,7 @@
       dxStatus(t('dx_building'), '');
       if (fmt === 'csv') {
         var sepChar = csvSep(el.dxSep ? el.dxSep.value : cfg.csvSep);
-        tables.forEach(function (tb) { saveBlob(new Blob([tableToCsv(report, tb, withRecap, sepChar)], { type: 'text/csv;charset=utf-8' }), exportFileName(tables.length > 1 ? tb.name : '', 'csv')); });
+        tables.forEach(function (tb) { saveBlob(new Blob(tableToCsv(report, tb, withRecap, sepChar), { type: 'text/csv;charset=utf-8' }), exportFileName(tables.length > 1 ? tb.name : '', 'csv')); });
         return finishMsg(tables);
       }
       // Une feuille Excel par feuille Tableau : données en haut, récap EN DESSOUS des lignes
@@ -1481,24 +1475,39 @@
       });
       return window.RecapXlsx.build(sheets).then(function (blob) { saveBlob(blob, exportFileName('', 'xlsx')); finishMsg(tables); });
     }).catch(function (err) {
+      if (err && err.cancelled) { dxStatus(t('dx_cancelled'), 'warn'); return; }
       if (err && err.tooMany) { dxStatus(t('dx_copy_too_many', { s: err.tooMany, n: maxRows.toLocaleString() }), 'err'); return; }
       console.warn('[recap] data export', err);
       dxStatus(t('dx_error', { e: errText(err) }), 'err');
     }).then(function () {
-      dx.busy = false; el.dxGo.disabled = el.dxCopy.disabled = false; setBusy(false);
+      dx.busy = false; dx.cancel = false; el.dxGo.disabled = el.dxCopy.disabled = false; setBusy(false);
+      el.dxGo.textContent = t('dx_export');
     });
   }
 
   function finishMsg (tables) {
     var rows = tables.reduce(function (s, tb) { return s + tb.rows.length; }, 0);
     var cut = tables.some(function (tb) { return tb.truncated; });
-    dxStatus(t('dx_done', { n: rows.toLocaleString() }) + (cut ? ' ' + t('dx_truncated', { n: (cfg.dataMaxRows || 200000).toLocaleString() }) : ''), cut ? 'warn' : 'ok');
+    dxStatus(t('dx_done', { n: rows.toLocaleString() }) + (cut ? ' ' + t('dx_truncated', { n: (dx.maxRows || cfg.dataMaxRows).toLocaleString() }) : ''), cut ? 'warn' : 'ok');
+  }
+
+  // « Lecture de "X"… 140 000 / 1 000 000 lignes — encore ~2 min (la feuille en compte 7 777 454 : 1 000 000 premières) »
+  function readingText (name, n, total, maxRows, t0) {
+    var goal = total ? Math.min(total, maxRows) : 0;
+    var txt = t('dx_reading', { s: name, n: n.toLocaleString() + (goal ? ' / ' + goal.toLocaleString() : '') });
+    var secs = (Date.now() - t0) / 1000;
+    if (goal && n > 0 && n < goal && secs > 2) {
+      var left = Math.round((goal - n) * secs / n);
+      txt += t('dx_eta', { t: left < 90 ? left + ' s' : Math.round(left / 60) + ' min' });
+    }
+    if (total > maxRows) txt += t('dx_capped', { total: total.toLocaleString(), max: maxRows.toLocaleString() });
+    return txt;
   }
 
   // Lecture paginée (Tableau 2022.4+), repli sur getSummaryDataAsync
   // Lecture des données de feuille : module partagé avec la fenêtre de configuration
   var RS = window.RecapSheet;
-  var readSheetData = RS.readSheetData; var toTable = RS.toTable; var vizSpec = RS.vizSpec;
+  var readSheetData = RS.readSheetData; var readSheetTable = RS.readSheetTable; var toTable = RS.toTable; var vizSpec = RS.vizSpec;
   var shapeTable = RS.shapeTable; var sheetColumns = RS.sheetColumns;
 
   // Récap : la colonne « Valeurs » (souvent longue) est placée en dernier
@@ -1566,13 +1575,19 @@
     return v.indexOf(d) !== -1 || v.indexOf('"') !== -1 ? '"' + v.replace(/"/g, '""') + '"' : v;
   }
 
+  // Renvoie une liste de morceaux de texte (pour un Blob) : jamais une chaîne géante en mémoire
   function tableToCsv (report, tb, withRecap, d) {
     d = d || csvSep(cfg.csvSep);
-    var line = function (arr) { return arr.map(function (v) { return csvValue(v, d); }).join(d); };
-    var out = [line(tb.header)];
-    tb.rows.forEach(function (r) { out.push(line(r)); });
+    var line = function (arr) { var o = new Array(arr.length); for (var i = 0; i < arr.length; i++) o[i] = csvValue(arr[i], d); return o.join(d); };
+    var parts = ['\ufeff' + line(tb.header)];
+    var buf = [];
+    for (var r = 0; r < tb.rows.length; r++) {
+      buf.push(line(tb.rows[r]));
+      if (buf.length === 20000) { parts.push('\r\n' + buf.join('\r\n')); buf = []; }
+    }
+    if (buf.length) parts.push('\r\n' + buf.join('\r\n'));
     if (withRecap) { // récap SOUS les données
-      out.push('', '');
+      var out = ['', ''];
       out.push(line([t('dx_recap_sheet').toUpperCase()]));
       out.push(line([recapTitle(report)]));
       out.push(line([t('ex_exported', { d: report.exportedLabel }) + ' — ' + sheetLine(tb)]));
@@ -1580,8 +1595,9 @@
       var lines = recapLines(report);
       if (!lines.length) out.push(line([t('ex_no_filter')]));
       lines.forEach(function (l) { out.push(line(l)); });
+      parts.push('\r\n' + out.join('\r\n'));
     }
-    return '\ufeff' + out.join('\r\n');
+    return parts;
   }
 
   // Copier-coller vers Excel (tabulations). Une valeur contenant un guillemet est
@@ -1685,6 +1701,8 @@
     var prev = cfg;
     cfg = assign({}, DEFAULTS, parsed);
     // Charte SMCP : une couleur hors palette (ancien réglage) revient au bordeaux
+    // Ancien plafond par défaut (200 000) jamais modifié volontairement : nouveau défaut
+    if (+cfg.dataMaxRows === 200000) cfg.dataMaxRows = DEFAULTS.dataMaxRows;
     if (BRAND_ACCENTS.indexOf(String(cfg.accent || '').toLowerCase()) === -1) cfg.accent = DEFAULTS.accent;
     if (['light', 'ecru', 'dark', 'transparent'].indexOf(cfg.theme) === -1) cfg.theme = 'light';
     var envLang = '';

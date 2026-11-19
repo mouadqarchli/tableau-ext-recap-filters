@@ -16,30 +16,38 @@
     }
     return t;
   })();
-  function crc32 (bytes) {
+  function crc32 (chunks) { // Uint8Array ou liste de Uint8Array
+    if (!Array.isArray(chunks)) chunks = [chunks];
     var c = 0xFFFFFFFF;
-    for (var i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    for (var k = 0; k < chunks.length; k++) {
+      var bytes = chunks[k];
+      for (var i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    }
     return (c ^ 0xFFFFFFFF) >>> 0;
   }
+  function byteLength (chunks) { var n = 0; for (var i = 0; i < chunks.length; i++) n += chunks[i].length; return n; }
 
-  function deflateRaw (bytes) {
+  function deflateRaw (chunks) {
     if (typeof CompressionStream !== 'function') return Promise.resolve(null);
     try {
       var cs = new CompressionStream('deflate-raw');
-      return new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer()
+      return new Response(new Blob(chunks).stream().pipeThrough(cs)).arrayBuffer()
         .then(function (b) { return new Uint8Array(b); }, function () { return null; });
     } catch (e) { return Promise.resolve(null); }
   }
 
   // ---- ZIP ----------------------------------------------------------------
-  function zip (files) { // files: [{ name, data: Uint8Array }]
+  // Les gros onglets sont encodés par morceaux : aucune chaîne XML géante (limite ~512 Mo des navigateurs)
+  function zip (files) { // files: [{ name, data: Uint8Array | [Uint8Array] }]
     var now = new Date();
     var dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
     var dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
     return Promise.all(files.map(function (f) {
-      return deflateRaw(f.data).then(function (comp) {
-        var useComp = comp && comp.length < f.data.length;
-        return { name: enc.encode(f.name), raw: f.data, body: useComp ? comp : f.data, method: useComp ? 8 : 0, crc: crc32(f.data) };
+      var chunks = Array.isArray(f.data) ? f.data : [f.data];
+      var rawLen = byteLength(chunks);
+      return deflateRaw(chunks).then(function (comp) {
+        var useComp = comp && comp.length < rawLen;
+        return { name: enc.encode(f.name), rawLen: rawLen, body: useComp ? [comp] : chunks, bodyLen: useComp ? comp.length : rawLen, method: useComp ? 8 : 0, crc: crc32(chunks) };
       });
     })).then(function (entries) {
       var chunks = []; var central = []; var offset = 0;
@@ -47,17 +55,17 @@
         var h = new DataView(new ArrayBuffer(30));
         h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
         h.setUint16(8, e.method, true); h.setUint16(10, dosTime, true); h.setUint16(12, dosDate, true);
-        h.setUint32(14, e.crc, true); h.setUint32(18, e.body.length, true); h.setUint32(22, e.raw.length, true);
+        h.setUint32(14, e.crc, true); h.setUint32(18, e.bodyLen, true); h.setUint32(22, e.rawLen, true);
         h.setUint16(26, e.name.length, true); h.setUint16(28, 0, true);
-        chunks.push(new Uint8Array(h.buffer), e.name, e.body);
+        chunks.push(new Uint8Array(h.buffer), e.name); for (var b = 0; b < e.body.length; b++) chunks.push(e.body[b]);
 
         var c = new DataView(new ArrayBuffer(46));
         c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
         c.setUint16(10, e.method, true); c.setUint16(12, dosTime, true); c.setUint16(14, dosDate, true);
-        c.setUint32(16, e.crc, true); c.setUint32(20, e.body.length, true); c.setUint32(24, e.raw.length, true);
+        c.setUint32(16, e.crc, true); c.setUint32(20, e.bodyLen, true); c.setUint32(24, e.rawLen, true);
         c.setUint16(28, e.name.length, true); c.setUint32(42, offset, true);
         central.push(new Uint8Array(c.buffer), e.name);
-        offset += 30 + e.name.length + e.body.length;
+        offset += 30 + e.name.length + e.bodyLen;
       });
       var cdSize = central.reduce(function (s, a) { return s + a.length; }, 0);
       var end = new DataView(new ArrayBuffer(22));
@@ -107,19 +115,20 @@
   // cell : null | string | number | boolean | Date | { v, s } (s = style)
   function cellXml (ref, cell) {
     if (cell == null || cell === '') return '';
+    var R = ref ? ' r="' + ref + '"' : '';
     var style = 0; var v = cell;
-    if (typeof cell === 'object' && !(cell instanceof Date)) { style = cell.s || 0; v = cell.v; if (v == null || v === '') return style ? '<c r="' + ref + '" s="' + style + '"/>' : ''; }
+    if (typeof cell === 'object' && !(cell instanceof Date)) { style = cell.s || 0; v = cell.v; if (v == null || v === '') return style ? '<c' + R + ' s="' + style + '"/>' : ''; }
     var s = style ? ' s="' + style + '"' : '';
-    if (typeof v === 'number') return isFinite(v) ? '<c r="' + ref + '"' + s + '><v>' + v + '</v></c>' : '';
-    if (typeof v === 'boolean') return '<c r="' + ref + '"' + s + ' t="b"><v>' + (v ? 1 : 0) + '</v></c>';
+    if (typeof v === 'number') return isFinite(v) ? '<c' + R + s + '><v>' + v + '</v></c>' : '';
+    if (typeof v === 'boolean') return '<c' + R + s + ' t="b"><v>' + (v ? 1 : 0) + '</v></c>';
     if (v instanceof Date) {
       if (isNaN(v.getTime())) return '';
       var hasTime = v.getHours() || v.getMinutes() || v.getSeconds();
-      return '<c r="' + ref + '" s="' + (style || (hasTime ? 3 : 2)) + '"><v>' + excelDate(v) + '</v></c>';
+      return '<c' + R + ' s="' + (style || (hasTime ? 3 : 2)) + '"><v>' + excelDate(v) + '</v></c>';
     }
     var str = String(v);
     if (str.length > 32767) str = str.slice(0, 32764) + '...';
-    return '<c r="' + ref + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + esc(str) + '</t></is></c>';
+    return '<c' + R + s + ' t="inlineStr"><is><t xml:space="preserve">' + esc(str) + '</t></is></c>';
   }
 
   // sheet : { name, rows: [[cell]], widths?: [n], freezeRow?: n (lignes figées), autoFilterRow?: n (1-based),
@@ -141,10 +150,15 @@
       parts.push('</cols>');
     }
     parts.push('<sheetData>');
+    var out = [];
+    var flush = function () { if (parts.length) { out.push(enc.encode(parts.join(''))); parts = []; } };
     for (var i = 0; i < rows.length; i++) {
-      var row = rows[i]; var cells = '';
-      for (var j = 0; j < row.length; j++) cells += cellXml(colName(j) + (i + 1), row[j]);
-      parts.push('<row r="' + (i + 1) + '">' + cells + '</row>');
+      var row = rows[i]; var cells = ''; var rn = i + 1;
+      // Référence de cellule « r » omise (facultative en OOXML, cellules écrites dans l'ordre) : fichier plus léger,
+      // génération plus rapide. Une cellule vide est remplacée par <c/> pour garder la position des suivantes.
+      for (var j = 0; j < row.length; j++) cells += cellXml(null, row[j]) || (j < row.length - 1 ? '<c/>' : '');
+      parts.push('<row r="' + rn + '">' + cells + '</row>');
+      if (parts.length >= 5000) flush();
     }
     parts.push('</sheetData>');
     var fr = filterRange(sh);
@@ -152,7 +166,8 @@
       parts.push('<autoFilter ref="A' + sh.autoFilterRow + ':' + colName(fr.cols - 1) + fr.end + '"/>');
     }
     parts.push('</worksheet>');
-    return parts.join('');
+    flush();
+    return out;
   }
 
   // Plage du filtre automatique : uniquement le bloc de données (pas le récap placé dessous)
@@ -213,7 +228,7 @@
     files.push({ name: 'xl/workbook.xml', data: enc.encode(wb) });
     files.push({ name: 'xl/_rels/workbook.xml.rels', data: enc.encode(wbRels) });
     files.push({ name: 'xl/styles.xml', data: enc.encode(STYLES) });
-    sheets.forEach(function (s, i) { files.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: enc.encode(sheetXml(s)) }); });
+    sheets.forEach(function (s, i) { files.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: sheetXml(s) }); });
     return zip(files);
   }
 

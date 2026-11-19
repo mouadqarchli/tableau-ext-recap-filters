@@ -14,87 +14,135 @@
     return s.replace(/[^a-z0-9]/g, '');
   }
 
-  function readSheetData (ws, maxRows, onProgress, pageSize) {
+  var PAGE_ROWS = 50000;   // lignes par page demandée à Tableau (avant : 10 000 -> 5x moins d'allers-retours)
+  var PAGE_ROWS_SAFE = 10000;
+
+  // Lecture paginée. sink (facultatif) reçoit chaque page (colonnes, lignes) au fil de l'eau :
+  // les objets DataValue de Tableau ne sont alors jamais tous gardés en mémoire.
+  // La page suivante est demandée AVANT de traiter la page courante (lecture et conversion en parallèle).
+  function readSheetData (ws, maxRows, onProgress, pageSize, sink) {
     var opts = { ignoreSelection: true };
-    var legacy = function () {
+    var oneShot = function () {
       return ws.getSummaryDataAsync(assign({ maxRows: maxRows }, opts)).then(function (tb) {
         onProgress(tb.data.length, tb.totalRowCount);
-        return { cols: tb.columns, rows: tb.data, truncated: tb.totalRowCount > tb.data.length };
+        if (sink) { sink(tb.columns, tb.data); return { cols: tb.columns, rows: null, n: tb.data.length, truncated: tb.totalRowCount > tb.data.length }; }
+        return { cols: tb.columns, rows: tb.data, n: tb.data.length, truncated: tb.totalRowCount > tb.data.length };
       });
     };
-    if (typeof ws.getSummaryDataReaderAsync === 'function') {
-      return ws.getSummaryDataReaderAsync(pageSize || 10000, opts).catch(function (err) {
-        console.warn('[recap] summary reader unavailable, fallback', err);
-        return null;
-      }).then(function (reader) {
-        if (!reader) return legacy();
-        var cols = null; var rows = []; var truncated = false;
-        var page = function (i) {
-          if (i >= reader.pageCount || rows.length >= maxRows) return Promise.resolve();
-          return reader.getPageAsync(i).then(function (tb) {
-            if (!cols) cols = tb.columns;
-            for (var r = 0; r < tb.data.length; r++) { if (rows.length >= maxRows) { truncated = true; break; } rows.push(tb.data[r]); }
-            onProgress(rows.length, reader.totalRowCount);
-            return page(i + 1);
-          });
-        };
-        var release = function () { return Promise.resolve(reader.releaseAsync ? reader.releaseAsync() : null).catch(function () {}); };
-        return page(0).then(function () {
-          return release().then(function () {
-            return { cols: cols || [], rows: rows, truncated: truncated || reader.totalRowCount > rows.length };
-          });
-        }, function (err) { return release().then(function () { throw err; }); });
-      });
-    }
-    return ws.getSummaryDataAsync(assign({ maxRows: maxRows }, opts)).then(function (tb) {
-      onProgress(tb.data.length, tb.totalRowCount);
-      return { cols: tb.columns, rows: tb.data, truncated: tb.totalRowCount > tb.data.length };
+    if (typeof ws.getSummaryDataReaderAsync !== 'function') return oneShot();
+    var size = pageSize || PAGE_ROWS;
+    return ws.getSummaryDataReaderAsync(size, opts).catch(function (err) {
+      if (size <= PAGE_ROWS_SAFE) throw err;
+      console.warn('[recap] page size ' + size + ' refused, retry with ' + PAGE_ROWS_SAFE, err);
+      return ws.getSummaryDataReaderAsync(PAGE_ROWS_SAFE, opts);
+    }).catch(function (err) {
+      console.warn('[recap] summary reader unavailable, fallback', err);
+      return null;
+    }).then(function (reader) {
+      if (!reader) return oneShot();
+      var cols = null; var rows = sink ? null : []; var n = 0; var truncated = false;
+      var total = reader.totalRowCount;
+      var get = function (i) { return i < reader.pageCount ? reader.getPageAsync(i) : null; };
+      var page = function (i, pending) {
+        if (!pending) return Promise.resolve();
+        return pending.then(function (tb) {
+          var more = n + tb.data.length < maxRows;
+          var next = more ? get(i + 1) : null; // prefetch
+          if (next) next.catch(function () {}); // évite une alerte « rejet non géré » si on s'arrête avant
+          if (!cols) cols = tb.columns;
+          var data = tb.data;
+          if (n + data.length > maxRows) { data = data.slice(0, maxRows - n); truncated = true; }
+          if (sink) sink(cols, data); else for (var r = 0; r < data.length; r++) rows.push(data[r]);
+          n += data.length;
+          onProgress(n, total);
+          return page(i + 1, next);
+        });
+      };
+      var release = function () { return Promise.resolve(reader.releaseAsync ? reader.releaseAsync() : null).catch(function () {}); };
+      return page(0, get(0)).then(function () {
+        return release().then(function () {
+          return { cols: cols || [], rows: rows, n: n, truncated: truncated || total > n };
+        });
+      }, function (err) { return release().then(function () { throw err; }); });
     });
   }
 
-  // Valeurs typées (nombres, dates, booléens) ; Measure Names/Values remis en colonnes
-  function toTable (d, valMode) {
+  // Conversion progressive : valeurs typées (nombres, dates, booléens), Measure Names/Values
+  // remis en colonnes. add() page par page, result() à la fin.
+  function tableBuilder (valMode) {
     var display = valMode === 'display';
-    var cols = d.cols.slice().sort(function (a, b) { return a.index - b.index; });
-    var mn = -1; var mv = -1;
-    cols.forEach(function (c, i) { if (MN_RE.test(c.fieldName)) mn = i; else if (MV_RE.test(c.fieldName)) mv = i; });
     var conv = function (dv, col) {
       if (!dv) return null;
       var v = dv.value; var f = dv.formattedValue;
       if (v == null || v === '%null%' || (f === 'Null' && (v === '' || v == null))) return display && f ? String(f) : null;
       if (display) return f != null ? String(f) : String(v);
       switch (col.dataType) {
-        case 'int': case 'float': { var n = typeof v === 'number' ? v : Number(v); return isFinite(n) ? n : f; }
+        case 'int': case 'float': { var x = typeof v === 'number' ? v : Number(v); return isFinite(x) ? x : f; }
         case 'bool': return v === true || v === 'true' || v === 1;
         case 'date': case 'date-time': { var dt = toDate(v); return dt || f; }
         default: return f != null && f !== '' ? String(f) : String(v);
       }
     };
-    if (mn === -1 || mv === -1) {
-      return {
-        header: cols.map(function (c) { return c.fieldName; }),
-        measures: [],
-        rows: d.rows.map(function (row) { return cols.map(function (c) { return conv(row[c.index], c); }); }),
-        truncated: d.truncated
-      };
-    }
-    var dims = cols.filter(function (c, i) { return i !== mn && i !== mv; });
-    var mnCol = cols[mn]; var mvCol = cols[mv];
-    var measures = []; var mIdx = {}; var groups = new Map(); var order = [];
-    d.rows.forEach(function (row) {
-      var mName = String(row[mnCol.index] ? row[mnCol.index].formattedValue : '');
-      if (!(mName in mIdx)) { mIdx[mName] = measures.length; measures.push(mName); }
-      var key = dims.map(function (c) { var x = row[c.index]; return x ? String(x.value) : ''; }).join('\u0001');
-      var g = groups.get(key);
-      if (!g) { g = { dims: dims.map(function (c) { return conv(row[c.index], c); }), vals: {} }; groups.set(key, g); order.push(key); }
-      g.vals[mName] = conv(row[mvCol.index], mvCol);
-    });
-    return {
-      header: dims.map(function (c) { return c.fieldName; }).concat(measures),
-      measures: measures.slice(),
-      rows: order.map(function (k) { var g = groups.get(k); return g.dims.concat(measures.map(function (m) { return g.vals[m] == null ? null : g.vals[m]; })); }),
-      truncated: d.truncated
+    var cols = null; var dims = null; var mnCol = null; var mvCol = null;
+    var outRows = []; var measures = []; var mIdx = {}; var groups = null; var order = [];
+    var init = function (columns) {
+      cols = columns.slice().sort(function (a, b) { return a.index - b.index; });
+      var mn = -1; var mv = -1;
+      cols.forEach(function (c, i) { if (MN_RE.test(c.fieldName)) mn = i; else if (MV_RE.test(c.fieldName)) mv = i; });
+      if (mn !== -1 && mv !== -1) {
+        mnCol = cols[mn]; mvCol = cols[mv];
+        dims = cols.filter(function (c, i) { return i !== mn && i !== mv; });
+        groups = new Map();
+      }
     };
+    return {
+      add: function (columns, data) {
+        if (!cols) init(columns);
+        var r, row, j;
+        if (!groups) {
+          var nc = cols.length;
+          for (r = 0; r < data.length; r++) {
+            row = data[r]; var out = new Array(nc);
+            for (j = 0; j < nc; j++) out[j] = conv(row[cols[j].index], cols[j]);
+            outRows.push(out);
+          }
+          return;
+        }
+        for (r = 0; r < data.length; r++) {
+          row = data[r];
+          var mName = String(row[mnCol.index] ? row[mnCol.index].formattedValue : '');
+          if (!(mName in mIdx)) { mIdx[mName] = measures.length; measures.push(mName); }
+          var key = '';
+          for (j = 0; j < dims.length; j++) { var x = row[dims[j].index]; key += (j ? '\u0001' : '') + (x ? String(x.value) : ''); }
+          var g = groups.get(key);
+          if (!g) { g = { dims: dims.map(function (c) { return conv(row[c.index], c); }), vals: {} }; groups.set(key, g); order.push(key); }
+          g.vals[mName] = conv(row[mvCol.index], mvCol);
+        }
+      },
+      result: function (truncated) {
+        if (!cols) return { header: [], measures: [], rows: [], truncated: !!truncated };
+        if (!groups) return { header: cols.map(function (c) { return c.fieldName; }), measures: [], rows: outRows, truncated: !!truncated };
+        return {
+          header: dims.map(function (c) { return c.fieldName; }).concat(measures),
+          measures: measures.slice(),
+          rows: order.map(function (k) { var g = groups.get(k); return g.dims.concat(measures.map(function (m) { return g.vals[m] == null ? null : g.vals[m]; })); }),
+          truncated: !!truncated
+        };
+      }
+    };
+  }
+
+  function toTable (d, valMode) {
+    var b = tableBuilder(valMode);
+    if (d.cols && d.cols.length) b.add(d.cols, d.rows || []);
+    return b.result(d.truncated);
+  }
+
+  // Lecture + conversion au fil de l'eau (export) : renvoie directement la table convertie
+  function readSheetTable (ws, maxRows, onProgress, valMode) {
+    var b = tableBuilder(valMode);
+    return readSheetData(ws, maxRows, onProgress, PAGE_ROWS, function (cols, data) { b.add(cols, data); })
+      .then(function (d) { return b.result(d.truncated); });
   }
 
   // Structure visuelle de la feuille (Tableau 2023.3+ / API 1.11) : ordre des
@@ -178,7 +226,7 @@
   // Colonnes détectées (échantillon) pour l'onglet Data export de Configure
   // Lecture séquentielle (Tableau n'accepte qu'un lecteur de données actif à la fois)
   function sheetColumns (ws) {
-    return readSheetData(ws, 2000, function () {}, 2000).then(function (d) {
+    return readSheetData(ws, 2000, function () {}, 2000, null).then(function (d) {
       return vizSpec(ws).then(function (spec) {
         var tb = toTable(d, 'raw');
         return autoColumns(tb, spec).map(function (c) { return { n: c.n, on: c.on }; });
@@ -195,6 +243,6 @@
 
   root.RecapSheet = {
     readSheetData: readSheetData, toTable: toTable, vizSpec: vizSpec, autoColumns: autoColumns,
-    shapeTable: shapeTable, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
+    readSheetTable: readSheetTable, tableBuilder: tableBuilder, shapeTable: shapeTable, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
   };
 })(typeof window !== 'undefined' ? window : globalThis);

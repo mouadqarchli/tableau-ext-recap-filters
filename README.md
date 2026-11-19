@@ -34,7 +34,7 @@ The export contains the **summary data** of each sheet (what the sheet displays,
 
 **Columns.** By default the export follows the sheet: dimensions in the order of the Rows/Columns shelves, then the measures (Tableau does not expose their display order: set it once in Columns), and fields placed only on Detail or Tooltip (helper calculations, titles…) are left out — this needs Tableau 2023.3+ (API 1.11). For full control, Configure… > Data export > **Columns** lets the designer tick, reorder and rename the columns of each sheet. The export panel also offers **Values: Raw** (typed numbers and dates) or **As displayed** (exactly the text shown in the view, e.g. "42%").
 
-In Configure… > **Data export** the designer chooses which sheets are exportable, which are ticked by default, and the maximum number of rows per sheet (200,000 by default).
+In Configure… > **Data export** the designer chooses which sheets are exportable, which are ticked by default, and the maximum number of rows per sheet (1,000,000 by default; Excel holds at most 1,048,576 rows per tab).
 
 > Governance: check with your Tableau Cloud admin how the "Download Summary Data" capability applies to extensions, and test with a user who does not have it.
 

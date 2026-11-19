@@ -6,14 +6,14 @@
     title: '', language: 'en', accent: '#A05546', theme: 'light', density: 'comfortable', layout: 'auto',
     showParams: true, showReset: true, showExport: true, showInactive: false, showRatio: true, maxChips: 4,
     useWorkbookFont: false, includeHiddenCards: true, includeHiddenParams: true, checkAllSelected: true, ignoreNullOnly: true,
-    overrides: null, showDataExport: true, dataSheets: null, dataDefaults: null, dataMaxRows: 200000, dataColumns: null, dataValues: 'raw', sortOrder: 'alpha', csvSep: 'auto'
+    overrides: null, showDataExport: true, dataSheets: null, dataDefaults: null, dataMaxRows: 1000000, dataColumns: null, dataValues: 'raw', sortOrder: 'alpha', csvSep: 'auto'
   };
   // Charte SMCP 2026 : couleurs primaires puis secondaires (pas de couleur libre)
   var PALETTE = [
     { c: '#A05546', n: 'Bordeaux' }, { c: '#28282D', n: 'Noir' }, { c: '#8C9B69', n: 'Olive' },
     { c: '#AA8250', n: 'Ocre' }, { c: '#CDD7E1', n: 'Bleu gris' }, { c: '#FAF073', n: 'Jaune' }
   ];
-  var BOOLS = ['showDataExport', 'showParams', 'showReset', 'showExport', 'showInactive', 'showRatio', 'useWorkbookFont', 'includeHiddenCards', 'includeHiddenParams', 'checkAllSelected', 'ignoreNullOnly'];
+  var BOOLS = ['showDataExport', 'showParams', 'showReset', 'showExport', 'showInactive', 'useWorkbookFont', 'includeHiddenCards', 'includeHiddenParams', 'checkAllSelected', 'ignoreNullOnly'];
   var inventory = null;
   var dataSel = { sheets: null, defaults: null, columns: {} };
   var ov = { f: {}, p: {}, pc: {}, labels: {}, nc: {} };
@@ -42,7 +42,7 @@
     $('maxChips').value = c.maxChips;
     BOOLS.forEach(function (k) { $(k).checked = !!c[k]; });
     setAccent(c.accent);
-    $('dataMaxRows').value = c.dataMaxRows || DEFAULTS.dataMaxRows;
+    $('dataMaxRows').value = (+c.dataMaxRows === 200000 ? 0 : c.dataMaxRows) || DEFAULTS.dataMaxRows; // ancien défaut -> nouveau
     $('sortOrder').value = c.sortOrder === 'dashboard' ? 'dashboard' : 'alpha';
     dataSel = { sheets: Array.isArray(c.dataSheets) ? c.dataSheets.slice() : null, defaults: Array.isArray(c.dataDefaults) ? c.dataDefaults.slice() : null,
       columns: JSON.parse(JSON.stringify(c.dataColumns || {})) };
