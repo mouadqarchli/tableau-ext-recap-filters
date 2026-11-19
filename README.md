@@ -11,7 +11,7 @@ Shows a visual recap of **what the user has selected on the dashboard**, in Engl
 
 ## Export
 
-The **Export** button (download icon) opens a window with the full report — every value of every filter, no truncation — plus a search box. From there:
+The **Export** button (clipboard-with-funnel icon) opens a window with the full report — every value of every filter, no truncation — plus a search box. From there:
 
 | Action | Result |
 |---|---|

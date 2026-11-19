@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.9.0';
+  var VERSION = '2.10.0';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -59,6 +59,8 @@
   var EVENT_DEBOUNCE_MS = 40;
   var LAYOUT_DEBOUNCE_MS = 150;
   var MAX_EXPANDED_CHIPS = 150;
+  var COPY_MAX_ROWS = 100000;     // au-delà, le presse-papiers échoue sans prévenir : export fichier conseillé
+  var NO_VALUE_RE = /^\s*(|-|\u2013|\u2014|null|\(null\))\s*$/i; // paramètre « vide » (« - », « — »…)
 
   var GENERATED_NAME_RE = [
     /^measure names$/i, /^noms? de mesures?$/i,
@@ -175,7 +177,10 @@
     el.btnData.addEventListener('click', toggleDataPanel);
     el.dxGo.addEventListener('click', function () { runDataExport('file'); });
     Array.prototype.forEach.call(el.dataPanel.querySelectorAll('input[name=dxFmt]'), function (r) { r.addEventListener('change', syncSepRow); });
-    el.dxCopy.addEventListener('click', function () { runDataExport('copy'); });
+    el.dxCopy.addEventListener('click', function () {
+      if (dx.pendingCopy != null) { copyPending(); return; } // 2e clic : copie dans le geste utilisateur
+      runDataExport('copy');
+    });
     document.addEventListener('keydown', function (e) {
       if (e.ctrlKey && e.altKey && (e.key === 'd' || e.key === 'D')) toggleDiag();
     });
@@ -800,6 +805,35 @@
     });
   }
 
+  // Un paramètre sans valeur (« - », « — », vide) n'apporte rien : tuile masquée, absent des exports
+  function hasParamValue (it) { return !NO_VALUE_RE.test(String(it.text == null ? '' : it.text)); }
+
+  // Colonnes pilotées par un paramètre : une colonne (ou un filtre) qui porte le nom d'un
+  // paramètre texte (ex. « Customer Dimension 1 ») est renommée avec la valeur actuelle de ce
+  // paramètre (ex. « Customer Name ») dans les exports. Lecture fraîche de TOUS les paramètres.
+  function paramRenamer () {
+    if (!dashboard) return Promise.resolve(null);
+    return dashboard.getParametersAsync().then(function (params) {
+      var map = {};
+      var add = function (name, v) { var k = norm(name); if (k && !map[k]) map[k] = v; };
+      params.forEach(function (p) {
+        if (p.dataType && p.dataType !== 'string') return; // « Top N = 10 » ne renomme rien
+        var cv = p.currentValue || {};
+        var v = String(cv.formattedValue != null && cv.formattedValue !== '' ? cv.formattedValue : cv.value == null ? '' : cv.value).trim();
+        if (NO_VALUE_RE.test(v)) return;
+        add(p.name, v);
+        var it = state.params.get(paramKey(p));
+        if (it && it.label) add(it.label, v); // libellé du contrôle s'il diffère du nom du paramètre
+      });
+      if (!Object.keys(map).length) return null;
+      return function (name) {
+        var raw = String(name == null ? '' : name).trim();
+        var m = /^[A-Za-z]+\((.*)\)$/.exec(raw); // ATTR(Customer Dimension 1)
+        return map[norm(m ? m[1] : raw)] || null;
+      };
+    }, function (e) { console.warn('[recap] parameters for column names', e); return null; });
+  }
+
   function pRow (name, status, tone) { return { sheet: '—', field: name, type: t('type_param'), status: status, tone: tone }; }
 
   // L'API ne relie pas explicitement un contrôle à son paramètre. Ordre des
@@ -908,7 +942,7 @@
       if (it.pending) { pending++; return false; } // verdict inconnu : pas d'apparition/disparition
       return it.active || it.forced || cfg.showInactive;
     });
-    var params = cfg.showParams ? sortedVisible(state.params) : [];
+    var params = cfg.showParams ? sortedVisible(state.params, hasParamValue) : [];
     var activeCount = filters.filter(function (it) { return it.active; }).length;
 
     reconcile(el.filtersGrid, filters);
@@ -997,8 +1031,10 @@
     var name = h('span', 'tile__name', it.label);
     name.title = it.paramName && it.paramName !== it.label ? it.label + ' (' + it.paramName + ')' : it.label;
     head.appendChild(name);
-    if (it.exclude) head.appendChild(h('span', 'tile__badge', t('badge_excluded')));
-    else if (it.except && it.active) head.appendChild(h('span', 'tile__badge', t('badge_except')));
+    var badge = null;
+    if (it.exclude) badge = h('span', 'tile__badge', t('badge_excluded'));
+    else if (it.except && it.active) badge = h('span', 'tile__badge', t('badge_except'));
+    if (badge) { badge.title = t(it.exclude ? 'tip_excluded' : 'tip_except'); head.appendChild(badge); }
     tile.appendChild(head);
 
     var body = h('div', 'tile__body');
@@ -1031,7 +1067,9 @@
     var frag = document.createDocumentFragment();
     var n = Math.min(values.length, limit);
     for (var i = 0; i < n; i++) {
-      var c = h('span', 'chip', values[i]); c.title = values[i]; frag.appendChild(c);
+      var c = h('span', 'chip', values[i]);
+      c.title = values[i] + '\n' + t(it.exclude ? 'tip_chip_excluded' : it.except ? 'tip_chip_except' : 'tip_chip_kept');
+      frag.appendChild(c);
     }
     if (values.length > limit || expanded) {
       var more = h('button', 'chip chip--more', expanded ? t('show_less') : '+' + (values.length - limit));
@@ -1100,8 +1138,6 @@
       ends.appendChild(h('span', null, it.dMin)); ends.appendChild(h('span', null, it.dMax));
       wrap.appendChild(ends);
       tile.appendChild(wrap);
-    } else if (it.options) {
-      var m = h('div', 'tile__meta'); m.appendChild(h('span', null, t('option_of', { n: it.options }))); tile.appendChild(m);
     }
   }
 
@@ -1204,10 +1240,12 @@
    * ===================================================================== */
   var EXPORT_MAX_VALUES = 5000; // par filtre, pour garder la fenêtre fluide
 
-  function buildReport () {
+  function buildReport (rename) {
     var now = new Date();
     var filters = sortedVisible(state.filters, function (it) { return it.active && !it.pending; }).map(function (it) {
-      var r = { name: it.label, type: it.type, mode: 'include', values: [], count: null, total: it.total || null, truncated: false };
+      // Libellé personnalisé dans Configure : conservé ; sinon nom du champ remplacé par la valeur du paramètre
+      var custom = overrides().labels[it.key];
+      var r = { name: (!custom && rename && rename(it.label)) || it.label, type: it.type, mode: 'include', values: [], count: null, total: it.total || null, truncated: false };
       if (it.type === 'range') {
         r.mode = 'range';
         r.values = [it.min != null && it.max != null ? it.min + ' → ' + it.max : it.min != null ? '≥ ' + it.min : '≤ ' + it.max];
@@ -1225,7 +1263,7 @@
       }
       return r;
     });
-    var params = (cfg.showParams ? sortedVisible(state.params) : []).map(function (it) {
+    var params = (cfg.showParams ? sortedVisible(state.params, hasParamValue) : []).map(function (it) {
       return { name: it.label, mode: 'param', values: [it.text] };
     });
     return {
@@ -1242,17 +1280,20 @@
   }
 
   function openExport () {
-    var report = buildReport();
+    paramRenamer().then(function (rn) { openExportWith(buildReport(rn)); });
+  }
+
+  function openExportWith (report) {
     var url = new URL('export.html', window.location.href).href;
     var opened = null;
     try {
       opened = T.extensions.ui.displayDialogAsync(url, JSON.stringify(report), { width: 760, height: 680 });
     } catch (e) { opened = null; }
-    if (!opened) { copyText(reportToText(report, t)); return; }
+    if (!opened) { copyText(reportToText(report, t), true); return; }
     opened.catch(function (err) {
       if (T.ErrorCodes && err && err.errorCode === T.ErrorCodes.DialogClosedByUser) return;
       console.warn('[recap] export dialog', err);
-      copyText(reportToText(report, t)); // repli : copie du récap en texte
+      copyText(reportToText(report, t), true); // repli : copie du récap en texte
     });
   }
 
@@ -1273,17 +1314,26 @@
     return lines.join('\n');
   }
 
-  function copyText (text) {
-    var done = function () { toast(t('copied')); };
-    var legacy = function () {
-      var ta = document.createElement('textarea');
-      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); done(); } catch (e) { console.warn('[recap] copy', e); }
-      document.body.removeChild(ta);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, legacy);
-    else legacy();
+  // Renvoie une promesse : true si le texte est réellement dans le presse-papiers.
+  // (Avant : « Copié » s'affichait même en cas d'échec, et l'ancien contenu restait collé.)
+  function copyText (text, withToast) {
+    return new Promise(function (resolve) {
+      var legacy = function () {
+        var ok = false;
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { ok = document.execCommand('copy') !== false; } catch (e) { console.warn('[recap] copy', e); ok = false; }
+        document.body.removeChild(ta);
+        resolve(ok);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { resolve(true); }, function (e) { console.warn('[recap] clipboard', e); legacy(); });
+      } else legacy();
+    }).then(function (ok) {
+      if (withToast) toast(t(ok ? 'copied' : 'copy_failed'));
+      return ok;
+    });
   }
 
   var toastTimer = 0;
@@ -1297,7 +1347,22 @@
    * Données récapitulatives (ce que montre la feuille, filtres appliqués) :
    * aucune permission « full data » n'est nécessaire.
    * ===================================================================== */
-  var dx = { busy: false };
+  var dx = { busy: false, pendingCopy: null, pendingRows: 0 };
+
+  // Le presse-papiers refuse souvent une écriture lancée longtemps après le clic (lecture de
+  // milliers de lignes) : le texte est alors gardé et le bouton devient « Copier maintenant ».
+  function setPendingCopy (text, rows) {
+    dx.pendingCopy = text; dx.pendingRows = rows || 0;
+    el.dxCopy.textContent = t(text == null ? 'dx_copy' : 'dx_copy_now');
+    el.dxCopy.classList.toggle('btn--primary', text != null);
+  }
+  function copyPending () {
+    var text = dx.pendingCopy; var rows = dx.pendingRows;
+    copyText(text).then(function (ok) {
+      if (ok) { setPendingCopy(null); dxStatus(t('dx_copied', { n: rows.toLocaleString() }), 'ok'); }
+      else dxStatus(t('dx_copy_failed'), 'err');
+    });
+  }
 
   function exportableSheets () {
     var DOT = T.DashboardObjectType; var list = []; var seen = {};
@@ -1312,6 +1377,7 @@
   }
 
   function toggleDataPanel () {
+    setPendingCopy(null);
     if (!el.dataPanel.hidden) { el.dataPanel.hidden = true; return; }
     var sheets = exportableSheets();
     var defs = Array.isArray(cfg.dataDefaults) && cfg.dataDefaults.length ? cfg.dataDefaults : sheets.slice(0, 1);
@@ -1360,20 +1426,25 @@
     var valMode = el.dataPanel.querySelector('input[name=dxVal]:checked');
     valMode = valMode ? valMode.value : (cfg.dataValues || 'raw');
     var maxRows = Math.max(1000, cfg.dataMaxRows | 0 || 200000);
+    if (mode === 'copy') maxRows = Math.min(maxRows, COPY_MAX_ROWS); // au-delà : export fichier
+    setPendingCopy(null);
+    var rename = null;
     dx.busy = true; el.dxGo.disabled = el.dxCopy.disabled = true; setBusy(true);
 
     var tables = [];
-    var chain = Promise.resolve();
+    var chain = paramRenamer().then(function (rn) { rename = rn; });
     names.forEach(function (name) {
       chain = chain.then(function () {
         var ws = findSheet(name);
         if (!ws) throw new Error(t('dx_sheet_missing', { s: name }));
         dxStatus(t('dx_reading', { s: name, n: 0 }), '');
         return timed(t('tm_export', { s: name }), readSheetData(ws, maxRows, function (n, total) {
+          // Copie : inutile de lire 100 000 lignes pour finalement refuser -> arrêt dès la 1re page
+          if (mode === 'copy' && total > maxRows) { var e = new Error('too_many'); e.tooMany = name; throw e; }
           dxStatus(t('dx_reading', { s: name, n: n.toLocaleString() + (total ? ' / ' + total.toLocaleString() : '') }), '');
         })).then(function (d) {
           return vizSpec(ws).then(function (spec) {
-            var tb = shapeTable(toTable(d, valMode), spec, (cfg.dataColumns || {})[name]);
+            var tb = shapeTable(toTable(d, valMode), spec, (cfg.dataColumns || {})[name], rename);
             tb.name = name; tables.push(tb);
           });
         });
@@ -1381,8 +1452,20 @@
     });
 
     return chain.then(function () {
-      var report = buildReport();
-      if (mode === 'copy') { copyText(tablesToTsv(report, tables, withRecap)); dxStatus(t('copied'), 'ok'); return; }
+      var report = buildReport(rename);
+      if (mode === 'copy') {
+        var cut = tables.filter(function (tb) { return tb.truncated; });
+        if (cut.length) { // copie partielle = piège : on refuse et on oriente vers l'export fichier
+          dxStatus(t('dx_copy_too_many', { s: cut.map(function (tb) { return tb.name; }).join(', '), n: maxRows.toLocaleString() }), 'err');
+          return;
+        }
+        var text = tablesToTsv(report, tables, withRecap);
+        var nRows = tables.reduce(function (a, tb) { return a + tb.rows.length; }, 0);
+        return copyText(text).then(function (ok) {
+          if (ok) dxStatus(t('dx_copied', { n: nRows.toLocaleString() }), 'ok');
+          else { setPendingCopy(text, nRows); dxStatus(t('dx_copy_ready', { n: nRows.toLocaleString() }), 'warn'); }
+        });
+      }
       dxStatus(t('dx_building'), '');
       if (fmt === 'csv') {
         var sepChar = csvSep(el.dxSep ? el.dxSep.value : cfg.csvSep);
@@ -1398,6 +1481,7 @@
       });
       return window.RecapXlsx.build(sheets).then(function (blob) { saveBlob(blob, exportFileName('', 'xlsx')); finishMsg(tables); });
     }).catch(function (err) {
+      if (err && err.tooMany) { dxStatus(t('dx_copy_too_many', { s: err.tooMany, n: maxRows.toLocaleString() }), 'err'); return; }
       console.warn('[recap] data export', err);
       dxStatus(t('dx_error', { e: errText(err) }), 'err');
     }).then(function () {
@@ -1844,7 +1928,7 @@
   window.addEventListener('resize', function () { if (cfg.layout === 'auto') applyLayout(); });
 
   // Expose quelques fonctions pures pour les tests (sans effet en production).
-  window.__recap = { timings: function () { return timings.slice(); }, dataExport: function (m) { return runDataExport(m); }, toTable: function (d) { return toTable(d); }, inventory: function () { return buildInventory(); }, report: function () { return reportToText(buildReport(), t); }, buildReport: function () { return buildReport(); }, version: VERSION, relativeLabel: function (a, b, c) { return t.relative(a, b, c); }, matchParams: matchParams, norm: norm, toNum: toNum, isGeneratedName: isGeneratedName };
+  window.__recap = { timings: function () { return timings.slice(); }, dataExport: function (m) { return runDataExport(m); }, toTable: function (d) { return toTable(d); }, inventory: function () { return buildInventory(); }, report: function () { return reportToText(buildReport(), t); }, buildReport: function () { return buildReport(); }, paramRenamer: paramRenamer, version: VERSION, relativeLabel: function (a, b, c) { return t.relative(a, b, c); }, matchParams: matchParams, norm: norm, toNum: toNum, isGeneratedName: isGeneratedName };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

@@ -141,8 +141,11 @@
     return cols.sort(function (x, y) { return x.rank - y.rank; });
   }
 
-  function shapeTable (tb, spec, manual) {
+  // rename (facultatif) : libellé automatique d'une colonne non renommée à la main
+  // (ex. « Customer Dimension 1 » -> valeur actuelle du paramètre : « Customer Name »).
+  function shapeTable (tb, spec, manual, rename) {
     var auto = autoColumns(tb, spec);
+    var lab = function (n) { var r = rename ? rename(n) : null; return r || n; };
     var plan;
     if (Array.isArray(manual) && manual.length) {
       var byName = {}; auto.forEach(function (c) { byName[c.n] = c; });
@@ -152,12 +155,19 @@
         var c = byName[m.n];
         if (!c || used[m.n]) return;
         used[m.n] = true;
-        if (m.on !== false) plan.push({ i: c.i, label: m.l || c.n });
+        if (m.on !== false) plan.push({ i: c.i, label: m.l || lab(c.n) });
       });
-      auto.forEach(function (c) { if (!used[c.n] && c.on) plan.push({ i: c.i, label: c.n }); }); // nouvelles colonnes
+      auto.forEach(function (c) { if (!used[c.n] && c.on) plan.push({ i: c.i, label: lab(c.n) }); }); // nouvelles colonnes
     } else {
-      plan = auto.filter(function (c) { return c.on; }).map(function (c) { return { i: c.i, label: c.n }; });
+      plan = auto.filter(function (c) { return c.on; }).map(function (c) { return { i: c.i, label: lab(c.n) }; });
     }
+    // Deux colonnes portant le même libellé (ex. 2 paramètres sur la même valeur) : suffixe (2), (3)…
+    var seen = {};
+    plan.forEach(function (p) {
+      var k = norm(p.label);
+      if (!seen[k]) { seen[k] = 1; return; }
+      seen[k]++; p.label = p.label + ' (' + seen[k] + ')';
+    });
     return {
       header: plan.map(function (p) { return p.label; }),
       rows: tb.rows.map(function (r) { return plan.map(function (p) { return r[p.i]; }); }),
@@ -185,6 +195,6 @@
 
   root.RecapSheet = {
     readSheetData: readSheetData, toTable: toTable, vizSpec: vizSpec, autoColumns: autoColumns,
-    shapeTable: shapeTable, sheetColumns: sheetColumns, toDate: toDate
+    shapeTable: shapeTable, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
   };
 })(typeof window !== 'undefined' ? window : globalThis);
