@@ -8,11 +8,11 @@ html, body.cfg { overflow: auto; background: #fff; color: var(--text); font-fami
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .field { display: block; margin-bottom: 14px; }
 .field__label { display: block; margin-bottom: 5px; font-family: var(--font-head); font-size: 10px; font-weight: 400; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
-.field input[type=text], .field input[type=number], .field select {
+.field input[type=text], .field input[type=number], .field input[type=url], .field textarea, .field select {
   width: 100%; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   font: inherit; font-size: 13px; color: var(--text); background: #fff;
 }
-.field input:focus, .field select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.field input:focus, .field textarea:focus, .field select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .swatches { display: flex; flex-wrap: wrap; align-items: center; }
 .swatch { width: 26px; height: 26px; margin: 0 6px 6px 0; border-radius: 2px; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--border-strong); cursor: pointer; padding: 0; }
 .swatch[aria-pressed=true] { box-shadow: 0 0 0 2px var(--text); }
@@ -120,3 +120,6 @@ html, body.cfg { overflow: auto; background: #fff; color: var(--text); font-fami
 .ov-more__hint { flex: 1 1 100%; margin: 4px 0 0; font-size: 11.5px; color: var(--text-2); }
 .ov-row__extra .ov-field { margin-bottom: 4px; }
 .ov-nc { margin-left: 0; margin-top: 6px; }
+
+.field textarea { height: auto; min-height: 58px; padding: 6px 8px; resize: vertical; font-family: Consolas, "Courier New", monospace; font-size: 11.5px; }
+.field input[type=url] { width: 100%; }

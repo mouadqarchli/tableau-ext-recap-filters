@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.11.0';
+  var VERSION = '2.12.0';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -45,6 +45,8 @@
     dataColumns: null,        // { feuille: [{ n: nom, l: libellé, on: bool }] } ordre/choix manuels des colonnes
     dataValues: 'raw',        // raw (nombres/dates typés) | display (texte tel qu'affiché)
     csvSep: 'auto',           // auto (selon la langue du poste) | ';' | ',' | 'tab'
+    serverUrl: '',            // adresse d'une vue publiée du classeur (export serveur) ; vide = détection automatique
+    serverViews: '',          // lignes « Nom de feuille = NomDansLURL » quand le nom d'URL diffère du nom de la feuille
     overrides: null,          // { f: {cléFiltre: 'show'|'hide'}, p: {cléParam: 'show'|'hide'} } — par dashboard
     checkAllSelected: true,   // détecter « toutes les valeurs cochées une à une » (requête de fond)
     ignoreNullOnly: true      // « Tout sauf Null » = non restrictif (comme la carte « (Tout) »)
@@ -159,7 +161,7 @@
 
   function cacheDom () {
     ['app', 'title', 'summary', 'btnRefresh', 'btnConfig', 'btnDiag', 'btnExport', 'btnData', 'btnClear', 'content', 'toast',
-      'dataPanel', 'dxSheets', 'dxRecap', 'dxStatus', 'dxGo', 'dxCopy', 'dxSep', 'dxSepRow',
+      'dataPanel', 'dxSheets', 'dxRecap', 'dxStatus', 'dxGo', 'dxCopy', 'dxSep', 'dxSepRow', 'dxValRow', 'dxFmtSrv', 'dxSrvHint',
       'errorBanner', 'errorMessage', 'btnRetry', 'emptyState',
       'filtersSection', 'filtersGrid', 'filtersCount',
       'paramsSection', 'paramsGrid', 'paramsCount', 'updatedAt', 'diagPanel', 'diagBody'
@@ -178,11 +180,14 @@
     el.btnData.addEventListener('click', toggleDataPanel);
     el.dxGo.addEventListener('click', function () {
       if (dx.busy) { dx.cancel = true; el.dxGo.disabled = true; return; } // bouton « Arrêter » pendant la lecture
+      if (dx.pendingOpen) { openServerUrls(dx.pendingOpen); return; }     // 2e clic : ouverture dans le geste utilisateur
+      if (selectedFmt() === 'server') { runServerExport('file'); return; }
       runDataExport('file');
     });
     Array.prototype.forEach.call(el.dataPanel.querySelectorAll('input[name=dxFmt]'), function (r) { r.addEventListener('change', syncSepRow); });
     el.dxCopy.addEventListener('click', function () {
       if (dx.pendingCopy != null) { copyPending(); return; } // 2e clic : copie dans le geste utilisateur
+      if (selectedFmt() === 'server') { runServerExport('copy'); return; }
       runDataExport('copy');
     });
     document.addEventListener('keydown', function (e) {
@@ -1341,7 +1346,7 @@
   // milliers de lignes) : le texte est alors gardé et le bouton devient « Copier maintenant ».
   function setPendingCopy (text, rows) {
     dx.pendingCopy = text; dx.pendingRows = rows || 0;
-    el.dxCopy.textContent = t(text == null ? 'dx_copy' : 'dx_copy_now');
+    el.dxCopy.textContent = t(text != null ? 'dx_copy_now' : selectedFmt() === 'server' ? 'dx_srv_copy' : 'dx_copy');
     el.dxCopy.classList.toggle('btn--primary', text != null);
   }
   function copyPending () {
@@ -1366,6 +1371,7 @@
 
   function toggleDataPanel () {
     setPendingCopy(null);
+    dx.pendingOpen = null;
     if (!el.dataPanel.hidden) { el.dataPanel.hidden = true; return; }
     var sheets = exportableSheets();
     var defs = Array.isArray(cfg.dataDefaults) && cfg.dataDefaults.length ? cfg.dataDefaults : sheets.slice(0, 1);
@@ -1379,6 +1385,11 @@
     });
     var desktop = false;
     try { desktop = T.extensions.environment.context === 'desktop'; } catch (e) { /* ignore */ }
+    // Export serveur : uniquement sur Tableau Server / Cloud (pas de serveur derrière Tableau Desktop)
+    if (el.dxFmtSrv) {
+      el.dxFmtSrv.hidden = desktop;
+      if (desktop && selectedFmt() === 'server') el.dataPanel.querySelector('input[name=dxFmt][value=xlsx]').checked = true;
+    }
     dxStatus(desktop ? t('dx_desktop_hint') : '', '');
     if (el.dxSep) el.dxSep.value = [';', ',', 'tab'].indexOf(cfg.csvSep) !== -1 ? cfg.csvSep : 'auto';
     syncSepRow();
@@ -1388,10 +1399,21 @@
     el.content.scrollTop = 0;
   }
 
+  function selectedFmt () {
+    var f = el.dataPanel.querySelector('input[name=dxFmt]:checked');
+    return f ? f.value : 'xlsx';
+  }
+
   function syncSepRow () {
     if (!el.dxSepRow) return;
-    var f = el.dataPanel.querySelector('input[name=dxFmt]:checked');
-    el.dxSepRow.hidden = !f || f.value !== 'csv';
+    var fmt = selectedFmt();
+    var srv = fmt === 'server';
+    el.dxSepRow.hidden = fmt !== 'csv';
+    if (el.dxValRow) el.dxValRow.hidden = srv;
+    if (el.dxSrvHint) el.dxSrvHint.hidden = !srv;
+    dx.pendingOpen = null;
+    el.dxGo.textContent = t(srv ? 'dx_srv_go' : 'dx_export');
+    if (dx.pendingCopy == null) el.dxCopy.textContent = t(srv ? 'dx_srv_copy' : 'dx_copy');
     var autoOpt = el.dxSep && el.dxSep.querySelector('option[value=auto]');
     if (autoOpt) autoOpt.textContent = t('dx_sep_auto', { s: csvSep('auto') === ';' ? ';' : ',' });
   }
@@ -1481,8 +1503,129 @@
       dxStatus(t('dx_error', { e: errText(err) }), 'err');
     }).then(function () {
       dx.busy = false; dx.cancel = false; el.dxGo.disabled = el.dxCopy.disabled = false; setBusy(false);
-      el.dxGo.textContent = t('dx_export');
+      el.dxGo.textContent = t(selectedFmt() === 'server' ? 'dx_srv_go' : 'dx_export');
     });
+  }
+
+  /* ---- Export serveur : Tableau génère lui-même le CSV complet ------------------
+   * L'extension ne lit AUCUNE ligne : elle construit l'adresse .../views/<classeur>/<feuille>.csv
+   * avec les filtres et paramètres actuels ; le navigateur télécharge le fichier produit par
+   * Tableau (session et droits de l'utilisateur). Des millions de lignes en quelques secondes.
+   * --------------------------------------------------------------------------- */
+  var RSV = window.RecapServer;
+
+  function serverBase () {
+    var b = RSV.parseViewUrl(cfg.serverUrl);
+    if (b) return b;
+    try { b = RSV.parseViewUrl(document.referrer); } catch (e) { b = null; } // adresse du dashboard si Tableau la transmet
+    return b;
+  }
+
+  // Filtres et paramètres -> adresse ; issues = ce qui ne peut pas être transmis par l'adresse
+  function serverPlan (sheetName, base) {
+    var issues = []; var filters = []; var jobs = [];
+    state.filters.forEach(function (it, key) {
+      if (!it.active) return;
+      var sheets = state.fieldSheets.get(key) || [];
+      if (sheets.indexOf(sheetName) === -1) return;
+      var f = state.filterObjs.get(key);
+      if (!f) return;
+      if (it.type !== 'categorical') { issues.push(t('dx_srv_issue_type', { f: it.label })); return; }
+      if (!f.isExcludeMode) {
+        var vals = []; var hasNull = false;
+        (f.appliedValues || []).forEach(function (dv) { var v = RSV.rawText(dv); if (v == null) hasNull = true; else vals.push(v); });
+        if (hasNull) issues.push(t('dx_srv_issue_null', { f: it.label }));
+        if (vals.length) filters.push({ field: f.fieldName, values: vals });
+        return;
+      }
+      // Mode « Exclure » : l'adresse ne sait qu'inclure -> on transmet les valeurs restantes
+      jobs.push(fetchDomain(f, 'verdict').then(function () {
+        var dom = caches.values.get(key);
+        if (!dom || dom.failed || !dom.vals.length) { issues.push(t('dx_srv_issue_excl', { f: it.label })); return; }
+        var ex = new Set((f.appliedValues || []).map(fmt));
+        var kept = dom.vals.filter(function (v) { return !ex.has(v) && !dom.nulls.has(v); });
+        if (kept.length) filters.push({ field: f.fieldName, values: kept });
+      }));
+    });
+    var paramsP = dashboard.getParametersAsync().then(function (ps) {
+      return ps.map(function (p) { return { name: p.name, value: RSV.rawText(p.currentValue) }; });
+    }, function () { issues.push(t('dx_srv_issue_params')); return []; });
+    return Promise.all(jobs.concat([paramsP])).then(function (res) {
+      var params = res[res.length - 1];
+      var q = RSV.buildQuery(filters, params);
+      var url = RSV.csvUrl(base, sheetName, RSV.parseOverrides(cfg.serverViews)) + (q ? '?' + q : '');
+      if (url.length > RSV.URL_SAFE_LENGTH) issues.push(t('dx_srv_issue_long', { n: url.length.toLocaleString() }));
+      return { sheet: sheetName, url: url, issues: issues };
+    });
+  }
+
+  function runServerExport (mode) {
+    if (dx.busy) return;
+    var names = dxSelection();
+    if (!names.length) { dxStatus(t('dx_pick_one'), 'err'); return; }
+    var base = serverBase();
+    if (!base) { dxStatus(t('dx_srv_nourl'), 'err'); return; }
+    dx.busy = true; dx.pendingOpen = null; setBusy(true);
+    var withRecap = el.dxRecap.checked;
+    var plans = [];
+    var chain = Promise.resolve();
+    names.forEach(function (n) { chain = chain.then(function () { return serverPlan(n, base).then(function (pl) { plans.push(pl); }); }); });
+    return chain.then(function () {
+      var issues = [];
+      plans.forEach(function (pl) { pl.issues.forEach(function (x) { issues.push((plans.length > 1 ? pl.sheet + ' : ' : '') + x); }); });
+      if (mode === 'copy') {
+        var text = plans.map(function (pl) { return (plans.length > 1 ? pl.sheet + '\n' : '') + pl.url; }).join('\n\n');
+        return copyText(text).then(function (ok) { statusWithIssues(t(ok ? 'dx_srv_copied' : 'dx_copy_failed'), issues, ok ? (issues.length ? 'warn' : 'ok') : 'err'); });
+      }
+      if (withRecap) { // le CSV du serveur ne contient que les données : récap dans un petit fichier à part
+        var report = buildReport(null);
+        saveBlob(new Blob([recapOnlyCsv(report)], { type: 'text/csv;charset=utf-8' }), exportFileName(t('dx_recap_sheet'), 'csv'));
+      }
+      if (issues.length) { // à confirmer : un filtre ne peut pas être transmis
+        dx.pendingOpen = plans;
+        el.dxGo.textContent = t('dx_srv_go_anyway');
+        statusWithIssues(t('dx_srv_check'), issues, 'warn');
+        return;
+      }
+      openServerUrls(plans);
+    }).catch(function (err) {
+      console.warn('[recap] server export', err);
+      dxStatus(t('dx_error', { e: errText(err) }), 'err');
+    }).then(function () { dx.busy = false; setBusy(false); });
+  }
+
+  function openServerUrls (plans) {
+    dx.pendingOpen = null;
+    el.dxGo.textContent = t('dx_srv_go');
+    var blocked = [];
+    plans.forEach(function (pl) {
+      var w = null;
+      try { w = window.open(pl.url, '_blank'); } catch (e) { w = null; }
+      if (!w) { blocked.push(pl); return; } // fenêtre bloquée (geste utilisateur trop ancien) : 2e clic
+      try { w.opener = null; } catch (e) { /* ignore */ }
+    });
+    if (blocked.length) { dx.pendingOpen = blocked; el.dxGo.textContent = t('dx_srv_go_anyway'); dxStatus(t('dx_srv_blocked'), 'warn'); return; }
+    dxStatus(t('dx_srv_started', { n: plans.length }), 'ok');
+  }
+
+  function statusWithIssues (msg, issues, tone) {
+    el.dxStatus.textContent = '';
+    el.dxStatus.className = 'dpanel__status' + (tone ? ' is-' + tone : '');
+    el.dxStatus.appendChild(document.createTextNode(msg));
+    if (!issues.length) return;
+    var ul = document.createElement('ul');
+    issues.forEach(function (x) { ul.appendChild(h('li', null, x)); });
+    el.dxStatus.appendChild(ul);
+  }
+
+  function recapOnlyCsv (report) {
+    var d = csvSep(cfg.csvSep);
+    var line = function (arr) { return arr.map(function (v) { return csvValue(v, d); }).join(d); };
+    var out = [line([recapTitle(report)]), line([t('ex_exported', { d: report.exportedLabel })]), '', line(recapHeader())];
+    var lines = recapLines(report);
+    if (!lines.length) out.push(line([t('ex_no_filter')]));
+    lines.forEach(function (l) { out.push(line(l)); });
+    return '\ufeff' + out.join('\r\n');
   }
 
   function finishMsg (tables) {
@@ -1946,7 +2089,7 @@
   window.addEventListener('resize', function () { if (cfg.layout === 'auto') applyLayout(); });
 
   // Expose quelques fonctions pures pour les tests (sans effet en production).
-  window.__recap = { timings: function () { return timings.slice(); }, dataExport: function (m) { return runDataExport(m); }, toTable: function (d) { return toTable(d); }, inventory: function () { return buildInventory(); }, report: function () { return reportToText(buildReport(), t); }, buildReport: function () { return buildReport(); }, paramRenamer: paramRenamer, version: VERSION, relativeLabel: function (a, b, c) { return t.relative(a, b, c); }, matchParams: matchParams, norm: norm, toNum: toNum, isGeneratedName: isGeneratedName };
+  window.__recap = { timings: function () { return timings.slice(); }, dataExport: function (m) { return runDataExport(m); }, toTable: function (d) { return toTable(d); }, inventory: function () { return buildInventory(); }, report: function () { return reportToText(buildReport(), t); }, buildReport: function () { return buildReport(); }, paramRenamer: paramRenamer, serverPlan: function (n) { return serverPlan(n, serverBase()); }, version: VERSION, relativeLabel: function (a, b, c) { return t.relative(a, b, c); }, matchParams: matchParams, norm: norm, toNum: toNum, isGeneratedName: isGeneratedName };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

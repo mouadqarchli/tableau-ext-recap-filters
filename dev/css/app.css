@@ -447,4 +447,6 @@ html, body {
 .dpanel__head strong, .diag__head strong { font-family: var(--font-head); font-weight: 400; letter-spacing: .08em; text-transform: uppercase; font-size: 11px; }
 .toast { font-family: var(--font-text); font-weight: 400; }
 .dpanel select { height: 26px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; }
-.dpanel__row[hidden] { display: none !important; }
+.dpanel__row[hidden], .dpanel .radio[hidden], .dpanel__hint[hidden] { display: none !important; }
+.dpanel__hint { margin: 4px 0 2px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-2); font-family: var(--font-text); font-size: 11.5px; line-height: 1.45; color: var(--text); box-shadow: inset 3px 0 0 var(--smcp-olive); }
+.dpanel__status ul { margin: 4px 0 0; padding-left: 18px; }
