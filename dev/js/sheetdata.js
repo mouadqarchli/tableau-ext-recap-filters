@@ -144,7 +144,7 @@
   function readSheetTable (ws, maxRows, onProgress, valMode) {
     var b = tableBuilder(valMode);
     return readSheetData(ws, maxRows, onProgress, PAGE_ROWS, function (cols, data) { b.add(cols, data); })
-      .then(function (d) { return b.result(d.truncated); });
+      .then(function (d) { var r = b.result(d.truncated); r.read = d.n; return r; });
   }
 
   // Structure visuelle de la feuille (Tableau 2023.3+ / API 1.11) : ordre des
@@ -238,7 +238,8 @@
     return {
       header: plan.map(function (p) { return p.label; }),
       rows: tb.rows.map(function (r) { return plan.map(function (p) { return r[p.i]; }); }),
-      truncated: tb.truncated
+      truncated: tb.truncated,
+      read: tb.read, measureCount: (tb.measures || []).length // lignes lues dans Tableau / mesures remises en colonnes
     };
   }
 

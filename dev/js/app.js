@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.15.0';
+  var VERSION = '2.16.0';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -178,9 +178,10 @@
     el.btnData.addEventListener('click', toggleDataPanel);
     el.dxGo.addEventListener('click', function () {
       if (dx.busy) { dx.cancel = true; el.dxGo.disabled = true; return; } // bouton « Arrêter » pendant la lecture
-      runDataExport('file');
+      var partial = dx.allowPartial; dx.allowPartial = false;
+      runDataExport('file', partial);
     });
-    Array.prototype.forEach.call(el.dataPanel.querySelectorAll('input[name=dxFmt]'), function (r) { r.addEventListener('change', syncSepRow); });
+    Array.prototype.forEach.call(el.dataPanel.querySelectorAll('input[name=dxFmt]'), function (r) { r.addEventListener('change', function () { resetPartial(); syncSepRow(); }); });
     el.dxCopy.addEventListener('click', function () {
       if (dx.pendingCopy != null) { copyPending(); return; } // 2e clic : copie dans le geste utilisateur
       runDataExport('copy');
@@ -1366,6 +1367,7 @@
 
   function toggleDataPanel () {
     setPendingCopy(null);
+    dx.allowPartial = false; if (!dx.busy) el.dxGo.textContent = t('dx_export');
     if (!el.dataPanel.hidden) { el.dataPanel.hidden = true; return; }
     var sheets = exportableSheets();
     var defs = Array.isArray(cfg.dataDefaults) && cfg.dataDefaults.length ? cfg.dataDefaults : sheets.slice(0, 1);
@@ -1376,7 +1378,7 @@
       var cb = h('input'); cb.type = 'checkbox'; cb.value = name; cb.checked = defs.indexOf(name) !== -1;
       lab.appendChild(cb); lab.appendChild(h('span', null, name));
       el.dxSheets.appendChild(lab);
-      cb.addEventListener('change', renderColPickers);
+      cb.addEventListener('change', function () { resetPartial(); renderColPickers(); });
     });
     dx.cols = {}; dx.rename = null;
     renderColPickers();
@@ -1607,7 +1609,15 @@
     return names;
   }
 
-  function runDataExport (mode) { // mode : 'file' | 'copy'
+  // Feuille au-delà de la limite : l'export s'arrête dès la 1re page avec un message ;
+  // le bouton propose alors d'exporter quand même les N premières lignes (2e clic).
+  function resetPartial () {
+    if (!dx.allowPartial) return;
+    dx.allowPartial = false;
+    if (!dx.busy) { el.dxGo.textContent = t('dx_export'); dxStatus('', ''); }
+  }
+
+  function runDataExport (mode, partialOk) { // mode : 'file' | 'copy'
     if (dx.busy) return;
     var names = dxSelection();
     if (!names.length) { dxStatus(t('dx_pick_one'), 'err'); return; }
@@ -1638,6 +1648,8 @@
           if (dx.cancel) { var c = new Error('cancelled'); c.cancelled = true; throw c; }
           // Copie : inutile de lire 100 000 lignes pour finalement refuser -> arrêt dès la 1re page
           if (mode === 'copy' && total > maxRows) { var e = new Error('too_many'); e.tooMany = name; throw e; }
+          // Export fichier : au-delà de la limite, on s'arrête tout de suite et on prévient
+          if (mode === 'file' && !partialOk && total > maxRows) { var o = new Error('over_limit'); o.overLimit = { s: name, total: total }; throw o; }
           dxStatus(readingText(name, n, total, maxRows, t0), '');
         }, valMode)).then(function (raw) {
           return vizSpec(ws).then(function (spec) {
@@ -1682,18 +1694,28 @@
     }).catch(function (err) {
       if (err && err.cancelled) { dxStatus(t('dx_cancelled'), 'warn'); return; }
       if (err && err.tooMany) { dxStatus(t('dx_copy_too_many', { s: err.tooMany, n: maxRows.toLocaleString() }), 'err'); return; }
+      if (err && err.overLimit) {
+        dxStatus(t('dx_over_limit', { s: err.overLimit.s, total: err.overLimit.total.toLocaleString(), n: maxRows.toLocaleString() }), 'err');
+        dx.allowPartial = true;
+        return;
+      }
       console.warn('[recap] data export', err);
       dxStatus(t('dx_error', { e: errText(err) }), 'err');
     }).then(function () {
       dx.busy = false; dx.cancel = false; el.dxGo.disabled = el.dxCopy.disabled = false; setBusy(false);
-      el.dxGo.textContent = t('dx_export');
+      el.dxGo.textContent = t(dx.allowPartial ? 'dx_export_partial' : 'dx_export', { n: maxRows.toLocaleString() });
     });
   }
 
   function finishMsg (tables) {
     var rows = tables.reduce(function (s, tb) { return s + tb.rows.length; }, 0);
     var cut = tables.some(function (tb) { return tb.truncated; });
-    dxStatus(t('dx_done', { n: rows.toLocaleString() }) + (cut ? ' ' + t('dx_truncated', { n: (dx.maxRows || cfg.dataMaxRows).toLocaleString() }) : ''), cut ? 'warn' : 'ok');
+    // Measure Names / Measure Values : Tableau renvoie une ligne PAR MESURE ; l'export les remet
+    // en colonnes (une ligne par combinaison de dimensions) -> moins de lignes que lues. On l'explique.
+    var piv = tables.filter(function (tb) { return tb.measureCount > 1 && tb.read > tb.rows.length; }).map(function (tb) {
+      return t('dx_pivot_note', { s: tb.name, read: tb.read.toLocaleString(), m: tb.measureCount, n: tb.rows.length.toLocaleString() });
+    });
+    dxStatus(t('dx_done', { n: rows.toLocaleString() }) + (piv.length ? ' ' + piv.join(' ') : '') + (cut ? ' ' + t('dx_truncated', { n: (dx.maxRows || cfg.dataMaxRows).toLocaleString() }) : ''), cut ? 'warn' : 'ok');
   }
 
   // « Lecture de "X"… 140 000 / 1 000 000 lignes — encore ~2 min (la feuille en compte 7 777 454 : 1 000 000 premières) »
