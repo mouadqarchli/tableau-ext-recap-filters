@@ -20,8 +20,21 @@
   // Lecture paginée. sink (facultatif) reçoit chaque page (colonnes, lignes) au fil de l'eau :
   // les objets DataValue de Tableau ne sont alors jamais tous gardés en mémoire.
   // La page suivante est demandée AVANT de traiter la page courante (lecture et conversion en parallèle).
-  function readSheetData (ws, maxRows, onProgress, pageSize, sink) {
-    var opts = { ignoreSelection: true };
+  // extra (facultatif) : options de lecture en plus, ex. { columnsToIncludeById: [...] }
+  // (seules les colonnes utiles transitent). Refusé par Tableau -> nouvel essai sans.
+  function readSheetData (ws, maxRows, onProgress, pageSize, sink, extra) {
+    var opts = assign({ ignoreSelection: true }, extra);
+    if (extra && extra.columnsToIncludeById && !extra._tried) {
+      var plain = function () { return readSheetData(ws, maxRows, onProgress, pageSize, sink, null); };
+      var started = false; var prog = onProgress;
+      onProgress = function (n, total) { started = true; prog(n, total); };
+      return readSheetData(ws, maxRows, onProgress, pageSize, sink, assign({}, extra, { _tried: 1 })).catch(function (err) {
+        if (started || (err && (err.cancelled || err.overLimit || err.tooMany))) throw err;
+        console.warn('[recap] column subset refused, full read', err);
+        return plain();
+      });
+    }
+    delete opts._tried;
     var oneShot = function () {
       return ws.getSummaryDataAsync(assign({ maxRows: maxRows }, opts)).then(function (tb) {
         onProgress(tb.data.length, tb.totalRowCount);
@@ -141,9 +154,9 @@
   }
 
   // Lecture + conversion au fil de l'eau (export) : renvoie directement la table convertie
-  function readSheetTable (ws, maxRows, onProgress, valMode) {
+  function readSheetTable (ws, maxRows, onProgress, valMode, extra) {
     var b = tableBuilder(valMode);
-    return readSheetData(ws, maxRows, onProgress, PAGE_ROWS, function (cols, data) { b.add(cols, data); })
+    return readSheetData(ws, maxRows, onProgress, PAGE_ROWS, function (cols, data) { b.add(cols, data); }, extra)
       .then(function (d) { var r = b.result(d.truncated); r.read = d.n; return r; });
   }
 
@@ -249,7 +262,9 @@
     return readSheetData(ws, 2000, function () {}, 2000, null).then(function (d) {
       return vizSpec(ws).then(function (spec) {
         var tb = toTable(d, 'raw');
-        return autoColumns(tb, spec).map(function (c) { return { n: c.n, on: c.on, t: c.t, g: c.g }; });
+        var out = autoColumns(tb, spec).map(function (c) { return { n: c.n, on: c.on, t: c.t, g: c.g }; });
+        out.pivot = tb.measures.length; // feuille en Measure Names / Values : nb de mesures
+        return out;
       });
     });
   }
@@ -263,6 +278,6 @@
 
   root.RecapSheet = {
     readSheetData: readSheetData, toTable: toTable, vizSpec: vizSpec, autoColumns: autoColumns,
-    readSheetTable: readSheetTable, norm: norm, tableBuilder: tableBuilder, shapeTable: shapeTable, columnPlan: columnPlan, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
+    readSheetTable: readSheetTable, norm: norm, isPivotCol: function (n) { return MN_RE.test(n) || MV_RE.test(n); }, tableBuilder: tableBuilder, shapeTable: shapeTable, columnPlan: columnPlan, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
   };
 })(typeof window !== 'undefined' ? window : globalThis);

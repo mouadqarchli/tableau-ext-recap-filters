@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.16.0';
+  var VERSION = '2.17.0';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -1562,6 +1562,7 @@
     list.appendChild(none);
     body.appendChild(list);
     body.appendChild(h('p', 'dcols__hint', t('dx_cols_hint')));
+    if (auto.pivot > 1) body.appendChild(h('p', 'dcols__tip', t('dx_cols_pivot_tip', { m: auto.pivot })));
 
     function isVisible (it) { return !query || it.key.indexOf(query) !== -1; }
     function visible () { var out = []; COL_GROUPS.forEach(function (g) { if (groups[g]) groups[g].members.forEach(function (it) { if (isVisible(it)) out.push(it); }); }); return out; }
@@ -1617,6 +1618,29 @@
     if (!dx.busy) { el.dxGo.textContent = t('dx_export'); dxStatus('', ''); }
   }
 
+  /* Lecture allégée : sans Measure Names / Values, chaque mesure est une colonne -> on ne
+   * demande à Tableau QUE les colonnes cochées (columnsToIncludeById) : pages bien plus légères.
+   * Avec Measure Names / Values, Tableau renvoie une ligne par mesure : le nombre de lignes est
+   * fixé par la vue et l'API ne permet pas de filtrer des lignes -> lecture complète. */
+  function readProjection (ws, name, rename) {
+    if (typeof ws.getSummaryColumnsInfoAsync !== 'function') return Promise.resolve({ extra: null, pivot: null });
+    return Promise.all([ws.getSummaryColumnsInfoAsync(), vizSpec(ws)]).then(function (r) {
+      var info = r[0] || []; var spec = r[1];
+      if (!info.length) return { extra: null, pivot: null };
+      if (info.some(function (c) { return RS.isPivotCol(c.fieldName); })) return { extra: null, pivot: true };
+      var fake = { header: info.map(function (c) { return c.fieldName; }), types: info.map(function (c) { return c.dataType; }), measures: [] };
+      var pick = sheetPick(name);
+      var kept = {};
+      RS.columnPlan(RS.autoColumns(fake, spec), (cfg.dataColumns || {})[name], rename).forEach(function (p) {
+        var on = pick && Object.prototype.hasOwnProperty.call(pick, p.n) ? !!pick[p.n] : p.on;
+        if (on) kept[p.n] = true;
+      });
+      var ids = info.filter(function (c) { return kept[c.fieldName] && c.fieldId; }).map(function (c) { return c.fieldId; });
+      if (!ids.length || ids.length >= info.length) return { extra: null, pivot: false };
+      return { extra: { columnsToIncludeById: ids }, pivot: false, kept: ids.length, total: info.length };
+    }).catch(function (e) { console.warn('[recap] columns info', e); return { extra: null, pivot: null }; });
+  }
+
   function runDataExport (mode, partialOk) { // mode : 'file' | 'copy'
     if (dx.busy) return;
     var names = dxSelection();
@@ -1636,7 +1660,7 @@
     if (mode === 'file') el.dxGo.textContent = t('dx_stop'); else el.dxGo.disabled = true;
     setBusy(true);
 
-    var tables = [];
+    var tables = []; var pivotSheets = [];
     var chain = readLock.then(paramRenamer).then(function (rn) { rename = rn; });
     names.forEach(function (name) {
       chain = chain.then(function () {
@@ -1644,6 +1668,8 @@
         if (!ws) throw new Error(t('dx_sheet_missing', { s: name }));
         dxStatus(t('dx_reading', { s: name, n: 0 }), '');
         var t0 = Date.now();
+        return readProjection(ws, name, rename).then(function (proj) {
+        if (proj.pivot) pivotSheets.push(name);
         return timed(t('tm_export', { s: name }), readSheetTable(ws, maxRows, function (n, total) {
           if (dx.cancel) { var c = new Error('cancelled'); c.cancelled = true; throw c; }
           // Copie : inutile de lire 100 000 lignes pour finalement refuser -> arrêt dès la 1re page
@@ -1651,12 +1677,13 @@
           // Export fichier : au-delà de la limite, on s'arrête tout de suite et on prévient
           if (mode === 'file' && !partialOk && total > maxRows) { var o = new Error('over_limit'); o.overLimit = { s: name, total: total }; throw o; }
           dxStatus(readingText(name, n, total, maxRows, t0), '');
-        }, valMode)).then(function (raw) {
+        }, valMode, proj.extra)).then(function (raw) {
           return vizSpec(ws).then(function (spec) {
             var tb = shapeTable(raw, spec, (cfg.dataColumns || {})[name], rename, sheetPick(name));
             if (!tb.header.length && raw.header.length) throw new Error(t('dx_cols_none_sel', { s: name }));
             tb.name = name; tables.push(tb);
           });
+        });
         });
       });
     });
