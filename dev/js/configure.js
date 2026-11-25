@@ -342,7 +342,7 @@
           var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = x.on;
           cb.addEventListener('change', function () { x.on = cb.checked; save(); draw(); });
           var name = document.createElement('span'); name.className = 'cols__name'; name.textContent = x.n; name.title = x.n;
-          var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = x.n; inp.value = x.l; inp.maxLength = 80;
+          var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = window.RecapSheet.stripAgg(x.n); inp.value = x.l; inp.maxLength = 80;
           inp.addEventListener('input', function () { x.l = inp.value.trim(); save(); });
           var mv = function (d, label, txt) {
             var b = document.createElement('button'); b.type = 'button'; b.className = 'cols__btn'; b.textContent = txt; b.title = label;

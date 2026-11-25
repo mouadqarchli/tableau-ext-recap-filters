@@ -217,8 +217,21 @@
   // sélecteur de colonnes de l'utilisateur final.
   // rename (facultatif) : libellé automatique d'une colonne non renommée à la main
   // (ex. « Customer Dimension 1 » -> valeur actuelle du paramètre : « Customer Name »).
+  /* « SOMME(Delivered Qty LY) » -> « Delivered Qty LY » : on retire l'agrégation que Tableau
+   * ajoute au nom des mesures (EN/FR/DE/ES). Si deux mesures retombent sur le même nom
+   * (ex. SOMME(Ventes) et MOYENNE(Ventes)), elles gardent leur nom complet. */
+  var AGG_PREFIX = /^\s*(SUM|AVG|MIN|MAX|CNTD?|COUNTD?|MEDIAN|AGG|ATTR|STDEVP?|VARP?|PCT\d+|SOMME|MOYENNE|COMPTED?|M[EÉ]DIANE|[EÉ]CART[ _]?TYPEP?|SUMME|MITTELWERT|ANZAHL|SUMA|PROMEDIO|CONTAR|RECUENTO)\(\s*(.*?)\s*\)(\s*\(\d+\))?\s*$/i;
+  function stripAgg (n) {
+    var m = AGG_PREFIX.exec(String(n || ''));
+    return m && m[2] ? m[2] + (m[3] || '') : n;
+  }
   function columnPlan (auto, manual, rename) {
-    var lab = function (n) { var r = rename ? rename(n) : null; return r || n; };
+    var short = {}; var cnt = {};
+    auto.forEach(function (c) { var r = rename ? rename(c.n) : null; var s = stripAgg(r || c.n); short[c.n] = s; cnt[norm(s)] = (cnt[norm(s)] || 0) + 1; });
+    var lab = function (n) {
+      var r = rename ? rename(n) : null; var full = r || n; var s = short[n];
+      return s && s !== full && cnt[norm(s)] === 1 ? s : full;
+    };
     var plan = [];
     if (Array.isArray(manual) && manual.length) {
       var byName = {}; auto.forEach(function (c) { byName[c.n] = c; });
@@ -278,6 +291,6 @@
 
   root.RecapSheet = {
     readSheetData: readSheetData, toTable: toTable, vizSpec: vizSpec, autoColumns: autoColumns,
-    readSheetTable: readSheetTable, norm: norm, isPivotCol: function (n) { return MN_RE.test(n) || MV_RE.test(n); }, tableBuilder: tableBuilder, shapeTable: shapeTable, columnPlan: columnPlan, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
+    readSheetTable: readSheetTable, norm: norm, isPivotCol: function (n) { return MN_RE.test(n) || MV_RE.test(n); }, tableBuilder: tableBuilder, shapeTable: shapeTable, columnPlan: columnPlan, stripAgg: stripAgg, sheetColumns: sheetColumns, toDate: toDate, fieldKey: fieldKey
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.18.0';
+  var VERSION = '2.19.0';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
