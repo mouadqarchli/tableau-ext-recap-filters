@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.17.0';
+  var VERSION = '2.18.0';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -1378,9 +1378,9 @@
       var cb = h('input'); cb.type = 'checkbox'; cb.value = name; cb.checked = defs.indexOf(name) !== -1;
       lab.appendChild(cb); lab.appendChild(h('span', null, name));
       el.dxSheets.appendChild(lab);
-      cb.addEventListener('change', function () { resetPartial(); renderColPickers(); });
+      cb.addEventListener('change', function () { resetPartial(); renderColPickers(); syncLimit(); });
     });
-    dx.cols = {}; dx.rename = null;
+    dx.cols = {}; dx.pivot = {}; dx.rename = null;
     renderColPickers();
     paramRenamer().then(function (rn) { dx.rename = rn; renderColPickers(); });
     var desktop = false;
@@ -1398,7 +1398,7 @@
     if (!el.dxSepRow) return;
     var f = el.dataPanel.querySelector('input[name=dxFmt]:checked');
     el.dxSepRow.hidden = !f || f.value !== 'csv';
-    if (el.dxLimit) el.dxLimit.textContent = t('dx_limit_note', { n: fileMaxRows(f ? f.value : 'xlsx').toLocaleString() });
+    syncLimit();
     var autoOpt = el.dxSep && el.dxSep.querySelector('option[value=auto]');
     if (autoOpt) autoOpt.textContent = t('dx_sep_auto', { s: csvSep('auto') === ';' ? ';' : ',' });
   }
@@ -1412,6 +1412,43 @@
   function fileMaxRows (fmt) {
     var m = Math.max(1000, cfg.dataMaxRows | 0 || DEFAULTS.dataMaxRows);
     return fmt === 'xlsx' ? Math.min(m, XLSX_MAX_ROWS) : m;
+  }
+
+  /* Avec Measure Names / Values, Tableau envoie UNE LIGNE PAR MESURE : la limite porte sur ces
+   * lignes lues, pas sur les lignes du fichier (une par combinaison de dimensions). Le message
+   * annonce donc, feuille par feuille, le nombre de lignes réellement exportables : limite ÷ mesures. */
+  function fileRowsFor (n, m) { return m > 1 ? Math.floor(n / m) : n; }
+  var limitTok = 0;
+  function syncLimit () {
+    if (!el.dxLimit) return;
+    var f = el.dataPanel.querySelector('input[name=dxFmt]:checked');
+    var n = fileMaxRows(f ? f.value : 'xlsx');
+    var names = dxSelection();
+    var tok = ++limitTok;
+    var paint = function (counts) {
+      if (tok !== limitTok) return;
+      el.dxLimit.textContent = '';
+      var piv = names.filter(function (s) { return counts[s] > 1; });
+      var line = function (txt, cls) { el.dxLimit.appendChild(h('span', 'dpanel__hintline' + (cls ? ' ' + cls : ''), txt)); };
+      if (!piv.length) line(t('dx_limit_simple', { n: n.toLocaleString() }));
+      else {
+        names.forEach(function (s) {
+          var m = counts[s];
+          if (m > 1) line(t('dx_limit_pivot', { s: s, k: fileRowsFor(n, m).toLocaleString(), m: m, n: n.toLocaleString() }));
+          else if (m === 0) line(t('dx_limit_sheet', { s: s, n: n.toLocaleString() }));
+        });
+        line(t('dx_limit_pivot_why', { n: n.toLocaleString() }), 'is-sub');
+      }
+      line(t('dx_limit_native'), 'is-sub');
+    };
+    var counts = {};
+    names.forEach(function (s) { if (dx.pivot && dx.pivot[s] != null) counts[s] = dx.pivot[s]; });
+    paint(counts);
+    var todo = names.filter(function (s) { return counts[s] == null; });
+    if (!todo.length) return;
+    Promise.all(todo.map(function (s) {
+      return loadSheetCols(s).then(function (a) { counts[s] = a.pivot > 1 ? a.pivot : 0; }, noop);
+    })).then(function () { paint(counts); });
   }
 
   /* ---- Choix des colonnes par l'utilisateur final ---------------------------
@@ -1438,7 +1475,7 @@
         if (!ws) throw new Error(t('dx_sheet_missing', { s: name }));
         return RS.sheetColumns(ws);
       });
-      dx.cols[name].catch(function () { delete dx.cols[name]; });
+      dx.cols[name].then(function (auto) { dx.pivot[name] = auto.pivot > 1 ? auto.pivot : 0; }, function () { delete dx.cols[name]; });
     }
     return dx.cols[name];
   }
@@ -1614,7 +1651,7 @@
   // le bouton propose alors d'exporter quand même les N premières lignes (2e clic).
   function resetPartial () {
     if (!dx.allowPartial) return;
-    dx.allowPartial = false;
+    dx.allowPartial = false; dx.partialN = 0;
     if (!dx.busy) { el.dxGo.textContent = t('dx_export'); dxStatus('', ''); }
   }
 
@@ -1675,8 +1712,8 @@
           // Copie : inutile de lire 100 000 lignes pour finalement refuser -> arrêt dès la 1re page
           if (mode === 'copy' && total > maxRows) { var e = new Error('too_many'); e.tooMany = name; throw e; }
           // Export fichier : au-delà de la limite, on s'arrête tout de suite et on prévient
-          if (mode === 'file' && !partialOk && total > maxRows) { var o = new Error('over_limit'); o.overLimit = { s: name, total: total }; throw o; }
-          dxStatus(readingText(name, n, total, maxRows, t0), '');
+          if (mode === 'file' && !partialOk && total > maxRows) { var o = new Error('over_limit'); o.overLimit = { s: name, total: total, m: (dx.pivot || {})[name] || 0, pivot: !!proj.pivot }; throw o; }
+          dxStatus(readingText(name, n, total, maxRows, t0, (dx.pivot || {})[name] || 0), '');
         }, valMode, proj.extra)).then(function (raw) {
           return vizSpec(ws).then(function (spec) {
             var tb = shapeTable(raw, spec, (cfg.dataColumns || {})[name], rename, sheetPick(name));
@@ -1722,7 +1759,14 @@
       if (err && err.cancelled) { dxStatus(t('dx_cancelled'), 'warn'); return; }
       if (err && err.tooMany) { dxStatus(t('dx_copy_too_many', { s: err.tooMany, n: maxRows.toLocaleString() }), 'err'); return; }
       if (err && err.overLimit) {
-        dxStatus(t('dx_over_limit', { s: err.overLimit.s, total: err.overLimit.total.toLocaleString(), n: maxRows.toLocaleString() }), 'err');
+        var ol = err.overLimit;
+        if (ol.m > 1) {
+          dx.partialN = fileRowsFor(maxRows, ol.m);
+          dxStatus(t('dx_over_limit_pivot', { s: ol.s, rows: Math.round(ol.total / ol.m).toLocaleString(), m: ol.m, total: ol.total.toLocaleString(), n: maxRows.toLocaleString(), k: dx.partialN.toLocaleString() }), 'err');
+        } else {
+          dx.partialN = maxRows;
+          dxStatus(t(ol.pivot ? 'dx_over_limit_pivot_nom' : 'dx_over_limit', { s: ol.s, total: ol.total.toLocaleString(), n: maxRows.toLocaleString() }), 'err');
+        }
         dx.allowPartial = true;
         return;
       }
@@ -1730,7 +1774,7 @@
       dxStatus(t('dx_error', { e: errText(err) }), 'err');
     }).then(function () {
       dx.busy = false; dx.cancel = false; el.dxGo.disabled = el.dxCopy.disabled = false; setBusy(false);
-      el.dxGo.textContent = t(dx.allowPartial ? 'dx_export_partial' : 'dx_export', { n: maxRows.toLocaleString() });
+      el.dxGo.textContent = t(dx.allowPartial ? 'dx_export_partial' : 'dx_export', { n: (dx.partialN || maxRows).toLocaleString() });
     });
   }
 
@@ -1742,11 +1786,14 @@
     var piv = tables.filter(function (tb) { return tb.measureCount > 1 && tb.read > tb.rows.length; }).map(function (tb) {
       return t('dx_pivot_note', { s: tb.name, read: tb.read.toLocaleString(), m: tb.measureCount, n: tb.rows.length.toLocaleString() });
     });
-    dxStatus(t('dx_done', { n: rows.toLocaleString() }) + (piv.length ? ' ' + piv.join(' ') : '') + (cut ? ' ' + t('dx_truncated', { n: (dx.maxRows || cfg.dataMaxRows).toLocaleString() }) : ''), cut ? 'warn' : 'ok');
+    var cutMsg = tables.filter(function (tb) { return tb.truncated; }).map(function (tb) {
+      return t('dx_truncated_sheet', { s: tb.name, n: tb.rows.length.toLocaleString() });
+    });
+    dxStatus(t('dx_done', { n: rows.toLocaleString() }) + (piv.length ? ' ' + piv.join(' ') : '') + (cut ? ' ' + cutMsg.join(' ') + ' ' + t('dx_truncated') : ''), cut ? 'warn' : 'ok');
   }
 
   // « Lecture de "X"… 140 000 / 1 000 000 lignes — encore ~2 min (la feuille en compte 7 777 454 : 1 000 000 premières) »
-  function readingText (name, n, total, maxRows, t0) {
+  function readingText (name, n, total, maxRows, t0, m) {
     var goal = total ? Math.min(total, maxRows) : 0;
     var txt = t('dx_reading', { s: name, n: n.toLocaleString() + (goal ? ' / ' + goal.toLocaleString() : '') });
     var secs = (Date.now() - t0) / 1000;
@@ -1754,7 +1801,7 @@
       var left = Math.round((goal - n) * secs / n);
       txt += t('dx_eta', { t: left < 90 ? left + ' s' : Math.round(left / 60) + ' min' });
     }
-    if (total > maxRows) txt += t('dx_capped', { total: total.toLocaleString(), max: maxRows.toLocaleString() });
+    if (total > maxRows) txt += m > 1 ? t('dx_capped_pivot', { k: fileRowsFor(maxRows, m).toLocaleString() }) : t('dx_capped', { total: total.toLocaleString(), max: maxRows.toLocaleString() });
     return txt;
   }
 
