@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.19.1';
+  var VERSION = '2.19.2';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -1521,7 +1521,7 @@
     });
   }
 
-  var COL_GROUPS = ['view', 'measure', 'hidden'];
+  var COL_GROUPS = ['all']; // un seul bloc : l'ordre de la liste = l'ordre des colonnes exportées
   function typeBadge (ty) {
     if (ty === 'int' || ty === 'float') return '#';
     if (ty === 'date' || ty === 'date-time') return t('dx_cols_t_date');
@@ -1537,7 +1537,7 @@
     var pick = sheetPick(name) || {};
     var has = function (n) { return Object.prototype.hasOwnProperty.call(pick, n); };
     var items = plan.map(function (p) {
-      return { p: p, on: has(p.n) ? !!pick[p.n] : p.on, key: RS.norm(p.label + ' ' + p.n), g: COL_GROUPS.indexOf(p.g) === -1 ? 'view' : p.g };
+      return { p: p, on: has(p.n) ? !!pick[p.n] : p.on, key: RS.norm(p.label + ' ' + p.n), g: 'all' };
     });
     var query = '';
     var last = null; // dernier élément cliqué (Maj+clic)
@@ -1571,7 +1571,7 @@
       head.appendChild(gcb); head.appendChild(h('span', 'dcols__gname', t('dx_cols_g_' + g))); head.appendChild(gcount);
       if (g === 'hidden') head.title = t('dx_cols_g_hidden_tip');
       gcb.addEventListener('change', function () { setMany(members.filter(isVisible), gcb.checked); });
-      list.appendChild(head);
+      // pas d'en-tête de groupe : Toutes / Aucune et le compteur du résumé suffisent
       var box = h('div', 'dcols__items');
       members.forEach(function (it) {
         var row = h('div', 'dcols__item'); // div (pas label) : Maj+clic fiable aussi sur le nom
