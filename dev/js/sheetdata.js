@@ -218,19 +218,31 @@
   // rename (facultatif) : libellé automatique d'une colonne non renommée à la main
   // (ex. « Customer Dimension 1 » -> valeur actuelle du paramètre : « Customer Name »).
   /* « SOMME(Delivered Qty LY) » -> « Delivered Qty LY » : on retire l'agrégation que Tableau
-   * ajoute au nom des mesures (EN/FR/DE/ES). Si deux mesures retombent sur le même nom
-   * (ex. SOMME(Ventes) et MOYENNE(Ventes)), elles gardent leur nom complet. */
+   * ajoute au nom des mesures (EN/FR/DE/ES). Si deux mesures retombent vraiment sur le même nom
+   * (ex. SOMME(Ventes) et MOYENNE(Ventes)), l'agrégation passe en suffixe : « Ventes (MOYENNE) ». */
   var AGG_PREFIX = /^\s*(SUM|AVG|MIN|MAX|CNTD?|COUNTD?|MEDIAN|AGG|ATTR|STDEVP?|VARP?|PCT\d+|SOMME|MOYENNE|COMPTED?|M[EÉ]DIANE|[EÉ]CART[ _]?TYPEP?|SUMME|MITTELWERT|ANZAHL|SUMA|PROMEDIO|CONTAR|RECUENTO)\(\s*(.*?)\s*\)(\s*\(\d+\))?\s*$/i;
-  function stripAgg (n) {
+  function aggParts (n) {
     var m = AGG_PREFIX.exec(String(n || ''));
-    return m && m[2] ? m[2] + (m[3] || '') : n;
+    return m && m[2] ? { name: m[2] + (m[3] || ''), agg: m[1].toUpperCase() } : null;
+  }
+  function stripAgg (n) { var a = aggParts(n); return a ? a.name : n; }
+  // Clé de doublon : casse, accents et espaces ignorés, mais symboles gardés (« % X » ≠ « X »)
+  function labelKey (s) {
+    s = String(s == null ? '' : s).toLowerCase();
+    if (s.normalize) s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return s.replace(/\s+/g, ' ').trim();
   }
   function columnPlan (auto, manual, rename) {
-    var short = {}; var cnt = {};
-    auto.forEach(function (c) { var r = rename ? rename(c.n) : null; var s = stripAgg(r || c.n); short[c.n] = s; cnt[norm(s)] = (cnt[norm(s)] || 0) + 1; });
+    var parts = {}; var cnt = {};
+    auto.forEach(function (c) {
+      var r = rename ? rename(c.n) : null; var a = aggParts(r || c.n);
+      parts[c.n] = a; var k = labelKey(a ? a.name : (r || c.n)); cnt[k] = (cnt[k] || 0) + 1;
+    });
     var lab = function (n) {
-      var r = rename ? rename(n) : null; var full = r || n; var s = short[n];
-      return s && s !== full && cnt[norm(s)] === 1 ? s : full;
+      var r = rename ? rename(n) : null; var full = r || n; var a = parts[n];
+      if (!a) return full;
+      if (cnt[labelKey(a.name)] === 1 || a.agg === 'AGG' || a.agg === 'ATTR') return a.name; // doublon AGG : (2) ajouté plus loin
+      return a.name + ' (' + a.agg + ')';
     };
     var plan = [];
     if (Array.isArray(manual) && manual.length) {
@@ -257,7 +269,7 @@
     // Deux colonnes portant le même libellé (ex. 2 paramètres sur la même valeur) : suffixe (2), (3)…
     var seen = {};
     plan.forEach(function (p) {
-      var k = norm(p.label);
+      var k = labelKey(p.label);
       if (!seen[k]) { seen[k] = 1; return; }
       seen[k]++; p.label = p.label + ' (' + seen[k] + ')';
     });

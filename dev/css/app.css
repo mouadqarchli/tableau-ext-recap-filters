@@ -423,7 +423,6 @@ html, body {
 .dcols__item[hidden], .dcols__group[hidden], .dcols__items[hidden], .dcols__note[hidden] { display: none; }
 .dcols__type { flex: none; min-width: 26px; padding: 0 3px; border-radius: 2px; background: var(--surface-2); color: var(--text-3); font-size: 9.5px; text-align: center; line-height: 15px; }
 .dcols__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dcols__orig { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 10.5px; }
 .dcols__note { margin: 6px 0; font-size: 11.5px; color: var(--text-2); }
 .dcols__note.is-err { color: var(--danger); }
 .dcols__tip { margin: 6px 0 0; padding: 5px 8px; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: inset 3px 0 0 var(--warn); font-size: 11px; line-height: 1.4; color: var(--text); }

@@ -17,7 +17,7 @@
   /* =====================================================================
    * Configuration
    * ===================================================================== */
-  var VERSION = '2.19.0';
+  var VERSION = '2.19.1';
   // Servie depuis /dev/ (branche develop) : badge DEV et cache local séparé de la prod
   var IS_DEV = /\/dev\//.test(window.location.pathname || '');
   var SETTINGS_KEY = 'recapConfig';
@@ -1579,7 +1579,6 @@
         row.appendChild(cb);
         row.appendChild(h('span', 'dcols__type', typeBadge(it.p.t)));
         row.appendChild(h('span', 'dcols__name', it.p.label));
-        if (it.p.label !== it.p.n) { row.appendChild(h('span', 'dcols__orig', it.p.n)); }
         row.title = it.p.label !== it.p.n ? it.p.label + ' (' + it.p.n + ')' : it.p.label;
         row.addEventListener('click', function (e) {
           var on = e.target === cb ? cb.checked : !it.on; // clic sur la case : déjà basculée par le navigateur
